@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: sun-moon-java-platform
+    static_configs:
+      # host.docker.internal resolves to the Docker host on Docker
+      # Desktop (Windows/Mac) — the app itself runs outside this
+      # docker-compose stack. Adjust if you containerize the app later.
+      - targets: ["host.docker.internal:8080"]
