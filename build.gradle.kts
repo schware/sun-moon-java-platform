@@ -34,8 +34,12 @@ dependencies {
     // OpenAPI 3 doc generation + Swagger UI, auto-derived from the
     // @RestController/@Valid annotations already on the controllers.
     // Served at /swagger-ui.html and /v3/api-docs under the app's context
-    // path once deployed.
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.9.1")
+    // path once deployed. Pinned to 2.6.0, the version springdoc's own POM
+    // declares against Spring Boot 3.3.0 (our 3.3.4 line) — newer springdoc
+    // releases (2.7+) target Spring Boot 3.4/3.5 and reference Spring
+    // Framework classes (e.g. LiteWebJarsResourceResolver) that don't exist
+    // in the 6.1.x Framework version this Boot line ships.
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
 
     // spring-boot-starter-jetty (below) is providedRuntime, and Spring
     // Boot's bootWar packages any dependency reachable through a
