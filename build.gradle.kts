@@ -31,6 +31,12 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
 
+    // OpenAPI 3 doc generation + Swagger UI, auto-derived from the
+    // @RestController/@Valid annotations already on the controllers.
+    // Served at /swagger-ui.html and /v3/api-docs under the app's context
+    // path once deployed.
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.9.1")
+
     // spring-boot-starter-jetty (below) is providedRuntime, and Spring
     // Boot's bootWar packages any dependency reachable through a
     // providedRuntime path into WEB-INF/lib-provided/ instead of
