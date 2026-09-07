@@ -21,14 +21,16 @@ repositories {
 // Spring/WAS/Jetty counterpart to the archived sun-moon-java-platform-netty.
 // See docs/adr/0004-spring-was-jetty-replaces-netty.md for why.
 //
-// The WAR deliberately does NOT bundle its own SLF4J/Logback (see the
-// configurations.all exclude below): the external Jetty container already
-// binds org.slf4j as a shared/system class, and Spring Boot's own Logback
-// LoggingSystem check fails with "LoggerFactory is not a Logback
-// LoggerContext" if the WAR brings a second, classloader-isolated copy of
-// Logback that ends up racing the container's binding. Excluding
-// spring-boot-starter-logging makes Spring Boot skip Logback management
-// entirely and defer to whatever the container already has bound.
+// The WAR bundles its own SLF4J/Logback normally (webapp classloader keeps
+// its own isolated copy — see WEB-INF/jetty-web.xml, which excludes
+// org.slf4j. from Jetty's default "system classes" so the container's own
+// binding never shadows it). Spring Boot's own logging management is
+// disabled via -Dorg.springframework.boot.logging.LoggingSystem=none on
+// the Jetty launch command (see docs/adr/0004): with it enabled, Spring's
+// LogbackLoggingSystem does an instanceof check against its own
+// classloader's LoggerContext type, which fails against the webapp's
+// isolated copy even though it's a perfectly working Logback instance.
+// Disabling Spring's management lets Logback self-initialize normally.
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web") {
         exclude(group = "org.springframework.boot", module = "spring-boot-starter-tomcat")
@@ -40,19 +42,11 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
 
-    // API only, for our own `LoggerFactory.getLogger(...)` calls to compile.
-    // Not bundled at runtime — the container supplies the real binding.
-    compileOnly("org.slf4j:slf4j-api:2.0.16")
-
     // Provided by the external Jetty container at deploy time; only needed
     // locally for `bootRun` and tests.
     providedRuntime("org.springframework.boot:spring-boot-starter-jetty")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-}
-
-configurations.all {
-    exclude(group = "org.springframework.boot", module = "spring-boot-starter-logging")
 }
 
 tasks.test {
