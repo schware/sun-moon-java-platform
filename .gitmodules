@@ -1,0 +1,9 @@
+[submodule "order"]
+	path = order
+	url = https://github.com/schware/sun-moon-java-platform-order.git
+[submodule "kds"]
+	path = kds
+	url = https://github.com/schware/sun-moon-java-platform-kds.git
+[submodule "delivery"]
+	path = delivery
+	url = https://github.com/schware/sun-moon-java-platform-delivery.git
