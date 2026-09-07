@@ -32,17 +32,23 @@ dependencies {
     implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
 
     // spring-boot-starter-jetty (below) is providedRuntime, and Spring
-    // Boot's bootWar packages any dependency that's ONLY reachable through
-    // a providedRuntime path into WEB-INF/lib-provided/ instead of
-    // WEB-INF/lib/ — slf4j-api ended up there transitively, meaning it was
-    // simply missing from the deployed webapp's classpath at runtime
-    // (ClassNotFoundException: org.slf4j.Logger/LoggerFactory). Declaring
-    // it directly as `implementation` forces it into WEB-INF/lib/.
+    // Boot's bootWar packages any dependency reachable through a
+    // providedRuntime path into WEB-INF/lib-provided/ instead of
+    // WEB-INF/lib/ — even when the same dependency is ALSO declared as
+    // implementation elsewhere, providedRuntime membership wins. slf4j-api
+    // came in transitively through spring-boot-starter-jetty this way and
+    // was simply missing from the deployed webapp's actual runtime
+    // classpath (ClassNotFoundException: org.slf4j.Logger/LoggerFactory).
+    // Excluding it from the providedRuntime dependency, while keeping our
+    // own explicit `implementation` declaration, is what actually forces
+    // it into WEB-INF/lib/.
     implementation("org.slf4j:slf4j-api:2.0.16")
 
     // Provided by the external Jetty container at deploy time; only needed
     // locally for `bootRun` and tests.
-    providedRuntime("org.springframework.boot:spring-boot-starter-jetty")
+    providedRuntime("org.springframework.boot:spring-boot-starter-jetty") {
+        exclude(group = "org.slf4j", module = "slf4j-api")
+    }
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
