@@ -67,11 +67,15 @@ too late — an external `${jetty.base}/webapps/<name>.xml` descriptor is
 needed to configure the `WebAppContext` early enough), and a
 `containerInitializerExclusionPattern` workaround to skip Logback's own
 optional servlet-integration hook. Some of these were legitimate, correct
-pieces of Jetty/EE10 knowledge — and are still in
-`src/main/webapp/WEB-INF/jetty-web.xml` and
-`~/apps/java-war/base/webapps/sun-moon-java-platform.xml` on the server —
-but none of them were *the* bug. **The actual fix was never a classloader
-problem; a single `unzip -l build/libs/*.war | grep slf4j` early on would
+pieces of Jetty/EE10 knowledge, but none of them were *the* bug. Once the
+real fix (below) landed, `WEB-INF/jetty-web.xml`'s classloader-isolation
+rule turned out to be unnecessary and was removed from the repo — the only
+surviving piece of the classloader detour is the external
+`~/apps/java-war/base/webapps/sun-moon-java-platform.xml` descriptor on the
+server (still needed to skip Logback's optional servlet-integration hook
+via `containerInitializerExclusionPattern`; see `docs/jetty.md` in
+Debian-Setting for the deploy checklist). **The actual fix was never a
+classloader problem; a single `unzip -l build/libs/*.war | grep slf4j` early on would
 have shown the jar sitting in `lib-provided/` and pointed straight at the
 real cause.**
 
