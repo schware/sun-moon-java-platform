@@ -40,6 +40,10 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
 
+    // API only, for our own `LoggerFactory.getLogger(...)` calls to compile.
+    // Not bundled at runtime — the container supplies the real binding.
+    compileOnly("org.slf4j:slf4j-api:2.0.16")
+
     // Provided by the external Jetty container at deploy time; only needed
     // locally for `bootRun` and tests.
     providedRuntime("org.springframework.boot:spring-boot-starter-jetty")
