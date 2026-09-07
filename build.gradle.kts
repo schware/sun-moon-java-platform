@@ -20,17 +20,6 @@ repositories {
 
 // Spring/WAS/Jetty counterpart to the archived sun-moon-java-platform-netty.
 // See docs/adr/0004-spring-was-jetty-replaces-netty.md for why.
-//
-// The WAR bundles its own SLF4J/Logback normally (webapp classloader keeps
-// its own isolated copy — see WEB-INF/jetty-web.xml, which excludes
-// org.slf4j. from Jetty's default "system classes" so the container's own
-// binding never shadows it). Spring Boot's own logging management is
-// disabled via -Dorg.springframework.boot.logging.LoggingSystem=none on
-// the Jetty launch command (see docs/adr/0004): with it enabled, Spring's
-// LogbackLoggingSystem does an instanceof check against its own
-// classloader's LoggerContext type, which fails against the webapp's
-// isolated copy even though it's a perfectly working Logback instance.
-// Disabling Spring's management lets Logback self-initialize normally.
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-web") {
         exclude(group = "org.springframework.boot", module = "spring-boot-starter-tomcat")
@@ -41,6 +30,15 @@ dependencies {
 
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
+
+    // spring-boot-starter-jetty (below) is providedRuntime, and Spring
+    // Boot's bootWar packages any dependency that's ONLY reachable through
+    // a providedRuntime path into WEB-INF/lib-provided/ instead of
+    // WEB-INF/lib/ — slf4j-api ended up there transitively, meaning it was
+    // simply missing from the deployed webapp's classpath at runtime
+    // (ClassNotFoundException: org.slf4j.Logger/LoggerFactory). Declaring
+    // it directly as `implementation` forces it into WEB-INF/lib/.
+    implementation("org.slf4j:slf4j-api:2.0.16")
 
     // Provided by the external Jetty container at deploy time; only needed
     // locally for `bootRun` and tests.
