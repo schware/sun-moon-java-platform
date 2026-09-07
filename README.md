@@ -14,7 +14,9 @@ This is the Java counterpart to `sun-moon-python-platform` and
 
 ## Status
 
-**Working scaffold, not a finished system.**
+**Working scaffold, not a finished system.** Verified live-deployed to
+Jetty on the Debian host (see [`docs/adr/0005`](docs/adr/0005-war-slf4j-classpath-bug.md)
+for a WAR/classpath bug hit and fixed along the way):
 
 - **REST**: `POST /orders` (Jakarta Bean Validation + Resilience4j around
   the event-publish call)
@@ -60,7 +62,14 @@ by copying to the Jetty `webapps/` autodeploy directory:
 cp build/libs/sun-moon-java-platform-0.1.0.war ~/apps/java-war/webapps/sun-moon-java-platform.war
 ```
 
-Jetty picks it up automatically. Then:
+Jetty also needs an external deployment descriptor alongside the WAR
+(`~/apps/java-war/base/webapps/sun-moon-java-platform.xml` on the Debian
+host) — see [`docs/adr/0005`](docs/adr/0005-war-slf4j-classpath-bug.md) for
+what it does and why it has to be external rather than the WAR's own
+`WEB-INF/jetty-web.xml`. It isn't checked into this repo since it's
+host-specific deployment config, not application source.
+
+Once both are in place, Jetty picks the WAR up automatically. Then:
 
 ```
 curl http://localhost:8080/sun-moon-java-platform/actuator/health
