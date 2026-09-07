@@ -21,7 +21,11 @@ for a WAR/classpath bug hit and fixed along the way):
 - **REST**: `POST /orders` (Jakarta Bean Validation + Resilience4j around
   the event-publish call)
 - **WebSocket**: `/ws` (echo)
-- **Actuator**: `/actuator/health`, `/actuator/prometheus`
+- **Actuator**: `/actuator/health`, `/actuator/prometheus` (disk-path
+  details redacted to the server's home directory — see
+  `config/RedactedDiskSpaceHealthIndicator` and `config/MetricsConfig`)
+- **API docs**: OpenAPI 3 / Swagger UI via springdoc — see
+  [`docs/swagger.md`](docs/swagger.md) for how to annotate new endpoints
 - **Batch**: a single startup pass (`OrderSummaryStartupRunner`) that sums
   seeded in-memory orders and logs the report
 
@@ -32,6 +36,12 @@ adapters behind Spring profiles is follow-up work, not done here.
 
 **Dropped from the Netty version:** the raw Socket transport (port 9090).
 There's no Servlet-API equivalent — see the ADR.
+
+**Planned (not started):** splitting into separate Order / KDS / Delivery
+services once better hardware is available — direction, messaging choice,
+and per-service NoSQL data strategy are documented in
+[`docs/adr/0006`](docs/adr/0006-future-msa-split.md) so it isn't
+re-litigated later.
 
 ## Stack
 
@@ -93,6 +103,7 @@ src/main/java/com/sunmoon/platform/
   batch/                        Startup order-summary pass
   infrastructure/persistence/   In-memory OrderRepository (fake; real adapter TBD)
   infrastructure/messaging/     In-memory EventPublisher (fake; real adapter TBD)
+  config/                       OpenAPI/Swagger setup, Actuator path-redaction
 ```
 
 See `docs/adr/` for the reasoning behind each architectural decision.
