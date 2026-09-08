@@ -4,13 +4,14 @@ import com.sunmoon.platform.core.CoreRuntime;
 import com.sunmoon.platform.core.RuntimeConfig;
 import com.sunmoon.platform.domain.operator.Action;
 import com.sunmoon.platform.domain.operator.OperatorRepository;
-import com.sunmoon.platform.domain.operator.OperatorScreenPermission;
 import com.sunmoon.platform.domain.operator.Screen;
 import com.sunmoon.platform.infrastructure.auth.InMemorySessionStore;
 import com.sunmoon.platform.infrastructure.auth.PasswordHasher;
 import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
+import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
+import io.netty.handler.codec.http.HttpResponseStatus;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -44,8 +45,7 @@ class BoAuthTest {
         operatorRepository.create("admin", PasswordHasher.hash("correct-horse"), "Super Admin", true);
         operatorRepository.create("viewer", PasswordHasher.hash("viewer-pass"), "No Perms", false);
 
-        RestEndpoint protectedEndpoint = request -> com.sunmoon.platform.transport.http.JsonResponses.of(
-                io.netty.handler.codec.http.HttpResponseStatus.OK, Map.of("ok", true));
+        RestEndpoint protectedEndpoint = request -> JsonResponses.of(HttpResponseStatus.OK, Map.of("ok", true));
 
         Map<String, RestEndpoint> routes = Map.of(
                 "/bo/auth/login", new LoginEndpoint(operatorRepository, sessionStore),
