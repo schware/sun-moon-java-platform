@@ -3,8 +3,12 @@
 A Java, DDD-based **Enterprise Runtime Platform**: one [Netty](https://netty.io/)
 runtime hosting Socket, REST API, WebSocket, and Batch Job together —
 open-source-first, targeting 1,000-10,000 concurrent connections, and
-deliberately **Spring-free**. See [`docs/adr/0002`](docs/adr/0002-ddd-enterprise-runtime-platform-on-netty-no-spring.md)
-for the full reasoning, and [`docs/adr/`](docs/adr/) for everything else.
+deliberately **Spring-free**.
+
+📐 **[`docs/DESIGN.md`](docs/DESIGN.md)** ([한국어](docs/DESIGN_kr.md)) — the
+as-built design: runtime topology, layering, BO permission model, batch
+engine, data model, and an honest list of what isn't built yet. Start
+there. For *why* each decision was made, see [`docs/adr/`](docs/adr/).
 
 This is the Java counterpart to
 [`sun-moon-python-platform`](../Python) and [`sun-moon-c-server`](../C) —
