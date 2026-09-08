@@ -1,15 +1,15 @@
 services:
-  oracle:
-    # Community image (gvenzl/oracle-free) — Oracle's own registry images
-    # require registry auth, which is awkward for local dev. Swap for the
-    # official image + registry credentials if that's a hard requirement.
-    image: gvenzl/oracle-free:23-slim
+  postgres:
+    # Not run locally by choice (docs/adr/0005) — for CI or whenever this
+    # is deployed. A managed Postgres at the actual deploy target is the
+    # intended live-verification path, not this local container.
+    image: postgres:17-alpine
     environment:
-      ORACLE_PASSWORD: app
-      APP_USER: app
-      APP_USER_PASSWORD: app
-    ports: ["1521:1521"]
-    volumes: ["oracle-data:/opt/oracle/oradata"]
+      POSTGRES_DB: sunmoon
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports: ["5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql/data"]
 
   redis:
     image: redis:7-alpine
@@ -38,4 +38,4 @@ services:
     depends_on: [prometheus]
 
 volumes:
-  oracle-data:
+  postgres-data:

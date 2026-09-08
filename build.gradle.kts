@@ -31,9 +31,10 @@ dependencies {
 
     implementation("org.mybatis:mybatis:3.5.16")
     implementation("com.zaxxer:HikariCP:5.1.0")
-    implementation("com.oracle.database.jdbc:ojdbc11:23.5.0.24.07")
+    implementation("org.postgresql:postgresql:42.7.4")
     implementation("org.flywaydb:flyway-core:10.20.1")
-    implementation("org.flywaydb:flyway-database-oracle:10.20.1")
+    implementation("org.flywaydb:flyway-database-postgresql:10.20.1")
+    implementation("at.favre.lib:bcrypt:0.10.2")
 
     implementation("org.redisson:redisson:3.37.0")
 

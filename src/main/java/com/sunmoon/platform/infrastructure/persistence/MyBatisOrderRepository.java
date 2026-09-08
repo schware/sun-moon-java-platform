@@ -8,11 +8,12 @@ import org.apache.ibatis.session.SqlSessionFactory;
 import java.util.List;
 
 /**
- * Real adapter over Oracle via MyBatis. Not live-verified in this
- * environment — see docs/adr/0003. Swap this in for
- * {@link InMemoryOrderRepository} once a real Oracle instance is reachable
- * (point {@code OracleConnectionSettings.fromEnv()} at it, run the Flyway
- * migration in {@code db/migration/}, then construct this instead).
+ * Real adapter over PostgreSQL via MyBatis. Not live-verified — no local
+ * Postgres in this dev environment, by choice; verification deferred to
+ * deploy time (see docs/adr/0005). Swap this in for
+ * {@link InMemoryOrderRepository} once a real Postgres instance is
+ * reachable (point {@code PostgresConnectionSettings.fromEnv()} at it, run
+ * the Flyway migrations in {@code db/migration/}, then construct this instead).
  */
 public final class MyBatisOrderRepository implements OrderRepository {
 

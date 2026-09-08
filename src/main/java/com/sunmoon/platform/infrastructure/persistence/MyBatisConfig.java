@@ -11,26 +11,28 @@ import org.apache.ibatis.transaction.jdbc.JdbcTransactionFactory;
 import javax.sql.DataSource;
 
 /**
- * Wires MyBatis to Oracle via HikariCP. Compiles and is structurally
- * correct, but has not been exercised against a live Oracle instance in
- * this environment (no Docker/Oracle available here) — see docs/adr/0003.
+ * Wires MyBatis to PostgreSQL via HikariCP. Compiles and is structurally
+ * correct, but has not been exercised against a live instance in this
+ * environment — no local Postgres install, by choice; verification is
+ * deferred to deploy time — see docs/adr/0005.
  */
 public final class MyBatisConfig {
 
-    public static DataSource buildDataSource(OracleConnectionSettings settings) {
+    public static DataSource buildDataSource(PostgresConnectionSettings settings) {
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setJdbcUrl(settings.jdbcUrl());
         hikariConfig.setUsername(settings.username());
         hikariConfig.setPassword(settings.password());
-        hikariConfig.setDriverClassName("oracle.jdbc.OracleDriver");
+        hikariConfig.setDriverClassName("org.postgresql.Driver");
         hikariConfig.setMaximumPoolSize(settings.maxPoolSize());
         return new HikariDataSource(hikariConfig);
     }
 
     public static SqlSessionFactory buildSqlSessionFactory(DataSource dataSource) {
-        Environment environment = new Environment("oracle", new JdbcTransactionFactory(), dataSource);
+        Environment environment = new Environment("postgres", new JdbcTransactionFactory(), dataSource);
         Configuration configuration = new Configuration(environment);
         configuration.addMapper(OrderMapper.class);
+        configuration.addMapper(OperatorMapper.class);
         return new SqlSessionFactoryBuilder().build(configuration);
     }
 

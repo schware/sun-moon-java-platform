@@ -23,13 +23,16 @@ C/C++ sides.
 - **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
 - **Metrics**: Micrometer → Prometheus text format
 - **Tracing**: OpenTelemetry spans (logging exporter)
+- **BO auth** (`docs/adr/0004`): `POST /bo/auth/login`/`logout`, `GET /bo/auth/me`, session cookie (`HttpOnly`+`SameSite=Lax`), BCrypt password hashing, a 3-tier permission model (super admin / per-screen / per-screen-per-action), enforced via an `AuthorizedEndpoint` decorator. First operator is seeded on startup from `BO_ADMIN_USERNAME`/`BO_ADMIN_PASSWORD`. BO's Common Code and Device CRUD screens themselves are not yet built — only the auth/permission layer they'll sit behind.
 
-**Not live-verified — no Docker/Oracle/Redis/Kafka in this dev
-environment** (see `docs/adr/0003` for why and what that means): the real
-`MyBatisOrderRepository` (Oracle), `RedissonCacheClient` (Redis), and
-`KafkaEventPublisher` (Kafka) adapters exist and compile, but `Bootstrap`
-wires in their in-memory fakes by default, and no test exercises the real
-ones. A `docker-compose.yml` is included to stand up real infra when ready.
+**Not live-verified — no local Postgres/Redis/Kafka in this dev
+environment, by choice** (see `docs/adr/0003`, `docs/adr/0005`): the real
+`MyBatisOrderRepository`/`MyBatisOperatorRepository` (PostgreSQL, swapped
+from Oracle), `RedissonCacheClient` (Redis), and `KafkaEventPublisher`
+(Kafka) adapters exist and compile, but `Bootstrap` wires in their
+in-memory fakes by default, and no test exercises the real ones.
+Verification is deferred to wherever this is actually deployed. A
+`docker-compose.yml` is included for local/CI use if that's ever wanted.
 
 ## Stack
 
