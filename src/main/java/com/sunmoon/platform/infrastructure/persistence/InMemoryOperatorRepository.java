@@ -4,6 +4,7 @@ import com.sunmoon.platform.domain.operator.Operator;
 import com.sunmoon.platform.domain.operator.OperatorRepository;
 import com.sunmoon.platform.domain.operator.OperatorScreenPermission;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -42,5 +43,22 @@ public final class InMemoryOperatorRepository implements OperatorRepository {
     @Override
     public boolean existsAny() {
         return !byId.isEmpty();
+    }
+
+    /**
+     * Test/wiring-support only — there's no `/bo/operators` CRUD endpoint
+     * yet to grant permissions through (see docs/adr/0006's "not yet
+     * built" list), so tests reach in here directly. Not part of the
+     * {@link OperatorRepository} port; the real MyBatis adapter doesn't
+     * need it either, for the same reason.
+     */
+    public void grantPermission(long operatorId, OperatorScreenPermission permission) {
+        permissionsByOperatorId.compute(operatorId, (id, existing) -> {
+            List<OperatorScreenPermission> updated = new ArrayList<>(
+                    existing == null ? List.of() : existing);
+            updated.removeIf(p -> p.screen() == permission.screen());
+            updated.add(permission);
+            return List.copyOf(updated);
+        });
     }
 }

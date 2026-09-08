@@ -23,15 +23,20 @@ C/C++ sides.
 - **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
 - **Metrics**: Micrometer → Prometheus text format
 - **Tracing**: OpenTelemetry spans (logging exporter)
-- **BO auth** (`docs/adr/0004`): `POST /bo/auth/login`/`logout`, `GET /bo/auth/me`, session cookie (`HttpOnly`+`SameSite=Lax`), BCrypt password hashing, a 3-tier permission model (super admin / per-screen / per-screen-per-action), enforced via an `AuthorizedEndpoint` decorator. First operator is seeded on startup from `BO_ADMIN_USERNAME`/`BO_ADMIN_PASSWORD`. BO's Common Code and Device CRUD screens themselves are not yet built — only the auth/permission layer they'll sit behind.
+- **BO auth** (`docs/adr/0004`/`0006`): `POST /bo/auth/login`/`logout`, `GET /bo/auth/me`, session cookie (`HttpOnly`+`SameSite=Lax`), BCrypt password hashing, a 3-tier permission model (super admin / per-screen / per-screen-per-action), enforced via an `AuthorizedEndpoint` decorator. First operator is seeded on startup from `BO_ADMIN_USERNAME`/`BO_ADMIN_PASSWORD`.
+- **BO Common Code CRUD** (`docs/adr/0008`): `GET`/`POST`/`PUT`/`DELETE /bo/common-code` — each permission-checked against the matching 조회/신규/저장/삭제 action. Device CRUD is the one BO screen still unbuilt.
+
+**Deployment target picked, not yet deployed** (`docs/adr/0007`): Render
+(app) + Neon (Postgres), both permanently free as of 2026-09. Device CRUD
+comes first, per the owner's build-then-deploy sequencing.
 
 **Not live-verified — no local Postgres/Redis/Kafka in this dev
 environment, by choice** (see `docs/adr/0003`, `docs/adr/0005`): the real
-`MyBatisOrderRepository`/`MyBatisOperatorRepository` (PostgreSQL, swapped
-from Oracle), `RedissonCacheClient` (Redis), and `KafkaEventPublisher`
-(Kafka) adapters exist and compile, but `Bootstrap` wires in their
-in-memory fakes by default, and no test exercises the real ones.
-Verification is deferred to wherever this is actually deployed. A
+`MyBatisOrderRepository`/`MyBatisOperatorRepository`/`MyBatisCommonCodeRepository`
+(PostgreSQL, swapped from Oracle), `RedissonCacheClient` (Redis), and
+`KafkaEventPublisher` (Kafka) adapters exist and compile, but `Bootstrap`
+wires in their in-memory fakes by default, and no test exercises the real
+ones. Verification is deferred to the actual Render+Neon deployment. A
 `docker-compose.yml` is included for local/CI use if that's ever wanted.
 
 ## Stack

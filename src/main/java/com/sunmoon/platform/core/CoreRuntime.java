@@ -2,6 +2,7 @@ package com.sunmoon.platform.core;
 
 import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.RestEndpoint;
+import com.sunmoon.platform.transport.http.RouteKey;
 import com.sunmoon.platform.transport.socket.SocketServerInitializer;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -25,9 +26,9 @@ public final class CoreRuntime {
     private static final Logger log = LoggerFactory.getLogger(CoreRuntime.class);
 
     private final RuntimeConfig config;
-    private final Map<String, RestEndpoint> httpRoutes;
+    private final Map<RouteKey, RestEndpoint> httpRoutes;
 
-    public CoreRuntime(RuntimeConfig config, Map<String, RestEndpoint> httpRoutes) {
+    public CoreRuntime(RuntimeConfig config, Map<RouteKey, RestEndpoint> httpRoutes) {
         this.config = config;
         this.httpRoutes = httpRoutes;
     }

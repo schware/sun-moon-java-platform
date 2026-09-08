@@ -10,21 +10,23 @@ import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpUtil;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.codec.http.QueryStringDecoder;
 
 import java.util.Map;
 
-/** Dispatches REST requests by exact path to a registered {@link RestEndpoint}. No regex/path-variable routing yet — add it when a second endpoint actually needs it, not before. */
+/** Dispatches REST requests by (method, path) — the path only, query string stripped — to a registered {@link RestEndpoint}. No path-variable routing yet; a target row's key goes in the request body/query instead (see the Common Code endpoints). */
 public final class RestRequestRouter extends SimpleChannelInboundHandler<FullHttpRequest> {
 
-    private final Map<String, RestEndpoint> routes;
+    private final Map<RouteKey, RestEndpoint> routes;
 
-    public RestRequestRouter(Map<String, RestEndpoint> routes) {
+    public RestRequestRouter(Map<RouteKey, RestEndpoint> routes) {
         this.routes = routes;
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest request) {
-        RestEndpoint endpoint = routes.get(request.uri());
+        String path = new QueryStringDecoder(request.uri()).path();
+        RestEndpoint endpoint = routes.get(new RouteKey(request.method(), path));
         FullHttpResponse response = endpoint != null
                 ? endpoint.handle(request)
                 : notFound();

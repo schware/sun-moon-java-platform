@@ -1,6 +1,8 @@
 package com.sunmoon.platform.core;
 
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
+import com.sunmoon.platform.transport.http.RouteKey;
+import io.netty.handler.codec.http.HttpMethod;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -40,7 +42,8 @@ class CoreRuntimeTransportsTest {
     @BeforeAll
     static void startRuntime() throws InterruptedException {
         RuntimeConfig config = RuntimeConfig.forTest(HTTP_PORT, SOCKET_PORT);
-        CoreRuntime runtime = new CoreRuntime(config, Map.of("/health", new HealthCheckEndpoint()));
+        CoreRuntime runtime = new CoreRuntime(config,
+                Map.of(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()));
         runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

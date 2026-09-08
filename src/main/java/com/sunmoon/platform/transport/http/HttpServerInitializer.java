@@ -23,9 +23,9 @@ public final class HttpServerInitializer extends ChannelInitializer<SocketChanne
     private static final int MAX_AGGREGATED_CONTENT_BYTES = 1024 * 1024;
     private static final String WEBSOCKET_PATH = "/ws";
 
-    private final Map<String, RestEndpoint> routes;
+    private final Map<RouteKey, RestEndpoint> routes;
 
-    public HttpServerInitializer(Map<String, RestEndpoint> routes) {
+    public HttpServerInitializer(Map<RouteKey, RestEndpoint> routes) {
         this.routes = routes;
     }
 

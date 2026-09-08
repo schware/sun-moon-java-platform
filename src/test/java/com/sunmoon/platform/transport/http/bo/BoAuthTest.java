@@ -11,6 +11,8 @@ import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
+import com.sunmoon.platform.transport.http.RouteKey;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -47,11 +49,12 @@ class BoAuthTest {
 
         RestEndpoint protectedEndpoint = request -> JsonResponses.of(HttpResponseStatus.OK, Map.of("ok", true));
 
-        Map<String, RestEndpoint> routes = Map.of(
-                "/bo/auth/login", new LoginEndpoint(operatorRepository, sessionStore),
-                "/bo/auth/logout", new LogoutEndpoint(sessionStore),
-                "/bo/auth/me", new MeEndpoint(sessionStore),
-                "/bo/common-code", new AuthorizedEndpoint(Screen.COMMON_CODE, Action.VIEW, sessionStore, protectedEndpoint)
+        Map<RouteKey, RestEndpoint> routes = Map.of(
+                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore),
+                new RouteKey(HttpMethod.POST, "/bo/auth/logout"), new LogoutEndpoint(sessionStore),
+                new RouteKey(HttpMethod.GET, "/bo/auth/me"), new MeEndpoint(sessionStore),
+                new RouteKey(HttpMethod.GET, "/bo/common-code"),
+                new AuthorizedEndpoint(Screen.COMMON_CODE, Action.VIEW, sessionStore, protectedEndpoint)
         );
 
         CoreRuntime runtime = new CoreRuntime(RuntimeConfig.forTest(HTTP_PORT, SOCKET_PORT), routes);
