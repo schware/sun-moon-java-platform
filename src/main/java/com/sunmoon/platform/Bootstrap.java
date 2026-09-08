@@ -6,6 +6,7 @@ import com.sunmoon.platform.batch.OrderSummaryReport;
 import com.sunmoon.platform.core.CoreRuntime;
 import com.sunmoon.platform.core.RuntimeConfig;
 import com.sunmoon.platform.domain.commoncode.CommonCodeRepository;
+import com.sunmoon.platform.domain.device.DeviceRepository;
 import com.sunmoon.platform.domain.operator.Action;
 import com.sunmoon.platform.domain.operator.OperatorRepository;
 import com.sunmoon.platform.domain.operator.Screen;
@@ -16,10 +17,12 @@ import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryCommonCodeRepository;
+import com.sunmoon.platform.infrastructure.persistence.InMemoryDeviceRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOrderRepository;
 import com.sunmoon.platform.transport.http.CreateOrderEndpoint;
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
+import com.sunmoon.platform.transport.http.HttpListenerSpec;
 import com.sunmoon.platform.transport.http.MetricsEndpoint;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -31,10 +34,15 @@ import com.sunmoon.platform.transport.http.bo.commoncode.CreateCommonCodeEndpoin
 import com.sunmoon.platform.transport.http.bo.commoncode.DeleteCommonCodeEndpoint;
 import com.sunmoon.platform.transport.http.bo.commoncode.ListCommonCodeEndpoint;
 import com.sunmoon.platform.transport.http.bo.commoncode.SaveCommonCodeEndpoint;
+import com.sunmoon.platform.transport.http.bo.device.CreateDeviceEndpoint;
+import com.sunmoon.platform.transport.http.bo.device.DeleteDeviceEndpoint;
+import com.sunmoon.platform.transport.http.bo.device.ListDeviceEndpoint;
+import com.sunmoon.platform.transport.http.bo.device.SaveDeviceEndpoint;
 import io.netty.handler.codec.http.HttpMethod;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -56,29 +64,31 @@ public final class Bootstrap {
         EventPublisher eventPublisher = new InMemoryEventPublisher();
         OperatorRepository operatorRepository = new InMemoryOperatorRepository();
         CommonCodeRepository commonCodeRepository = new InMemoryCommonCodeRepository();
+        DeviceRepository deviceRepository = new InMemoryDeviceRepository();
         SessionStore sessionStore = new InMemorySessionStore();
 
         seedSuperAdminIfNeeded(operatorRepository);
 
-        Map<RouteKey, RestEndpoint> httpRoutes = buildHttpRoutes(
-                eventPublisher, operatorRepository, commonCodeRepository, sessionStore);
+        List<HttpListenerSpec> listeners = List.of(
+                new HttpListenerSpec("BO", config.boPort(),
+                        boRoutes(operatorRepository, commonCodeRepository, deviceRepository, sessionStore), false),
+                new HttpListenerSpec("Order API", config.apiPort(), apiRoutes(eventPublisher), true));
 
         runStartupBatchJob(orderRepository);
 
-        CoreRuntime runtime = new CoreRuntime(config, httpRoutes);
-        runtime.start();
+        new CoreRuntime(listeners, config.socketPort()).start();
     }
 
-    private static Map<RouteKey, RestEndpoint> buildHttpRoutes(
-            EventPublisher eventPublisher,
+    /** BO port: the BO screens plus the operational endpoints, since this is the port published when deployed (docs/adr/0007). */
+    private static Map<RouteKey, RestEndpoint> boRoutes(
             OperatorRepository operatorRepository,
             CommonCodeRepository commonCodeRepository,
+            DeviceRepository deviceRepository,
             SessionStore sessionStore) {
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/metrics"), new MetricsEndpoint()),
-                Map.entry(new RouteKey(HttpMethod.POST, "/orders"), new CreateOrderEndpoint(eventPublisher)),
 
                 Map.entry(new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore)),
                 Map.entry(new RouteKey(HttpMethod.POST, "/bo/auth/logout"), new LogoutEndpoint(sessionStore)),
@@ -95,8 +105,27 @@ public final class Bootstrap {
                                 new SaveCommonCodeEndpoint(commonCodeRepository))),
                 Map.entry(new RouteKey(HttpMethod.DELETE, "/bo/common-code"),
                         new AuthorizedEndpoint(Screen.COMMON_CODE, Action.DELETE, sessionStore,
-                                new DeleteCommonCodeEndpoint(commonCodeRepository)))
-        );
+                                new DeleteCommonCodeEndpoint(commonCodeRepository))),
+
+                Map.entry(new RouteKey(HttpMethod.GET, "/bo/devices"),
+                        new AuthorizedEndpoint(Screen.DEVICE, Action.VIEW, sessionStore,
+                                new ListDeviceEndpoint(deviceRepository))),
+                Map.entry(new RouteKey(HttpMethod.POST, "/bo/devices"),
+                        new AuthorizedEndpoint(Screen.DEVICE, Action.CREATE, sessionStore,
+                                new CreateDeviceEndpoint(deviceRepository))),
+                Map.entry(new RouteKey(HttpMethod.PUT, "/bo/devices"),
+                        new AuthorizedEndpoint(Screen.DEVICE, Action.SAVE, sessionStore,
+                                new SaveDeviceEndpoint(deviceRepository))),
+                Map.entry(new RouteKey(HttpMethod.DELETE, "/bo/devices"),
+                        new AuthorizedEndpoint(Screen.DEVICE, Action.DELETE, sessionStore,
+                                new DeleteDeviceEndpoint(deviceRepository))));
+    }
+
+    /** Order API port — the business-facing REST surface, plus the WebSocket transport. Not the port BO is published on. */
+    private static Map<RouteKey, RestEndpoint> apiRoutes(EventPublisher eventPublisher) {
+        return Map.of(
+                new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint(),
+                new RouteKey(HttpMethod.POST, "/orders"), new CreateOrderEndpoint(eventPublisher));
     }
 
     /**

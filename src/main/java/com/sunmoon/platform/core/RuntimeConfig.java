@@ -1,32 +1,37 @@
 package com.sunmoon.platform.core;
 
 /**
- * Runtime-wide configuration. Grows one field at a time as each
- * transport/persistence piece is wired up, rather than pre-declaring the
- * whole eventual shape.
+ * Runtime-wide configuration. Ports separate exposure boundaries within the
+ * one runtime (docs/adr/0009): BO on its own port (the one published when
+ * deployed), the Order API on another, raw Socket on a third.
  */
 public final class RuntimeConfig {
 
-    private final int httpPort;
+    private final int boPort;
+    private final int apiPort;
     private final int socketPort;
 
-    private RuntimeConfig(int httpPort, int socketPort) {
-        this.httpPort = httpPort;
+    private RuntimeConfig(int boPort, int apiPort, int socketPort) {
+        this.boPort = boPort;
+        this.apiPort = apiPort;
         this.socketPort = socketPort;
     }
 
     public static RuntimeConfig fromEnv() {
-        int httpPort = Integer.parseInt(System.getenv().getOrDefault("HTTP_PORT", "8080"));
-        int socketPort = Integer.parseInt(System.getenv().getOrDefault("SOCKET_PORT", "9090"));
-        return new RuntimeConfig(httpPort, socketPort);
+        var env = System.getenv();
+        return new RuntimeConfig(
+                Integer.parseInt(env.getOrDefault("BO_PORT", "8080")),
+                Integer.parseInt(env.getOrDefault("API_PORT", "8083")),
+                Integer.parseInt(env.getOrDefault("SOCKET_PORT", "9090"))
+        );
     }
 
-    public static RuntimeConfig forTest(int httpPort, int socketPort) {
-        return new RuntimeConfig(httpPort, socketPort);
+    public int boPort() {
+        return boPort;
     }
 
-    public int httpPort() {
-        return httpPort;
+    public int apiPort() {
+        return apiPort;
     }
 
     public int socketPort() {

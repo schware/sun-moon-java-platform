@@ -1,6 +1,7 @@
 package com.sunmoon.platform.core;
 
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
+import com.sunmoon.platform.transport.http.HttpListenerSpec;
 import com.sunmoon.platform.transport.http.RouteKey;
 import io.netty.handler.codec.http.HttpMethod;
 import org.junit.jupiter.api.AfterAll;
@@ -18,6 +19,7 @@ import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
@@ -41,9 +43,10 @@ class CoreRuntimeTransportsTest {
 
     @BeforeAll
     static void startRuntime() throws InterruptedException {
-        RuntimeConfig config = RuntimeConfig.forTest(HTTP_PORT, SOCKET_PORT);
-        CoreRuntime runtime = new CoreRuntime(config,
-                Map.of(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()));
+        CoreRuntime runtime = new CoreRuntime(
+                List.of(new HttpListenerSpec("test", HTTP_PORT,
+                        Map.of(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()), true)),
+                SOCKET_PORT);
         runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

@@ -11,12 +11,13 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import java.util.Map;
 
 /**
- * REST and WebSocket share one port and one pipeline — the standard Netty
- * pattern (WebSocketServerProtocolHandler intercepts the "/ws" handshake and
- * upgrades that connection to WS frames; every other HTTP request passes
- * through unchanged to {@link RestRequestRouter}), and the same "one runtime,
- * multiple transports" shape {@code sun-moon-c-server}'s "http" mode already
- * proved in C.
+ * When WebSocket is enabled, REST and WebSocket share this listener's port
+ * and pipeline — the standard Netty pattern (WebSocketServerProtocolHandler
+ * intercepts the "/ws" handshake and upgrades that connection to WS frames;
+ * every other HTTP request passes through unchanged to
+ * {@link RestRequestRouter}), and the same "one runtime, multiple
+ * transports" shape {@code sun-moon-c-server}'s "http" mode proved in C.
+ * The BO listener leaves it off — BO is REST only.
  */
 public final class HttpServerInitializer extends ChannelInitializer<SocketChannel> {
 
@@ -24,9 +25,11 @@ public final class HttpServerInitializer extends ChannelInitializer<SocketChanne
     private static final String WEBSOCKET_PATH = "/ws";
 
     private final Map<RouteKey, RestEndpoint> routes;
+    private final boolean webSocketEnabled;
 
-    public HttpServerInitializer(Map<RouteKey, RestEndpoint> routes) {
+    public HttpServerInitializer(Map<RouteKey, RestEndpoint> routes, boolean webSocketEnabled) {
         this.routes = routes;
+        this.webSocketEnabled = webSocketEnabled;
     }
 
     @Override
@@ -34,8 +37,10 @@ public final class HttpServerInitializer extends ChannelInitializer<SocketChanne
         ChannelPipeline pipeline = channel.pipeline();
         pipeline.addLast(new HttpServerCodec());
         pipeline.addLast(new HttpObjectAggregator(MAX_AGGREGATED_CONTENT_BYTES));
-        pipeline.addLast(new WebSocketServerProtocolHandler(WEBSOCKET_PATH));
-        pipeline.addLast(new WsEchoHandler());
+        if (webSocketEnabled) {
+            pipeline.addLast(new WebSocketServerProtocolHandler(WEBSOCKET_PATH));
+            pipeline.addLast(new WsEchoHandler());
+        }
         pipeline.addLast(new RestRequestRouter(routes));
     }
 }

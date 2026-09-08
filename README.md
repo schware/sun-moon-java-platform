@@ -17,18 +17,23 @@ C/C++ sides.
 **Working scaffold, not a finished system.** Verified live (see
 `docs/adr/0003`):
 
-- **REST**: `GET /health`, `GET /metrics` (Prometheus scrape), `POST /orders` (Jakarta Bean Validation + Resilience4j)
-- **WebSocket**: `/ws` (echo)
-- **Raw Socket**: port 9090 (echo)
-- **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
-- **Metrics**: Micrometer → Prometheus text format
-- **Tracing**: OpenTelemetry spans (logging exporter)
+**Ports** (`docs/adr/0009`) — one runtime, three listeners:
+
+| Port | Listener | Serves | Override |
+|---|---|---|---|
+| 8080 | BO | `/health`, `/metrics`, `/bo/*` | `BO_PORT` |
+| 8083 | Order API | `/health`, `/orders`, WebSocket `/ws` | `API_PORT` |
+| 9090 | Socket | raw TCP (echo) | `SOCKET_PORT` |
+
 - **BO auth** (`docs/adr/0004`/`0006`): `POST /bo/auth/login`/`logout`, `GET /bo/auth/me`, session cookie (`HttpOnly`+`SameSite=Lax`), BCrypt password hashing, a 3-tier permission model (super admin / per-screen / per-screen-per-action), enforced via an `AuthorizedEndpoint` decorator. First operator is seeded on startup from `BO_ADMIN_USERNAME`/`BO_ADMIN_PASSWORD`.
-- **BO Common Code CRUD** (`docs/adr/0008`): `GET`/`POST`/`PUT`/`DELETE /bo/common-code` — each permission-checked against the matching 조회/신규/저장/삭제 action. Device CRUD is the one BO screen still unbuilt.
+- **BO Common Code CRUD** (`docs/adr/0008`) and **BO Device CRUD** (`docs/adr/0009`): `GET`/`POST`/`PUT`/`DELETE` on `/bo/common-code` and `/bo/devices` — each permission-checked against the matching 조회/신규/저장/삭제 action. Devices are master data only; connection state belongs to the (unbuilt) Device Server.
+- **Order API**: `POST /orders` (Jakarta Bean Validation + Resilience4j), WebSocket `/ws` (echo)
+- **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
+- **Metrics**: Micrometer → Prometheus text format; **Tracing**: OpenTelemetry spans (logging exporter)
 
 **Deployment target picked, not yet deployed** (`docs/adr/0007`): Render
-(app) + Neon (Postgres), both permanently free as of 2026-09. Device CRUD
-comes first, per the owner's build-then-deploy sequencing.
+(app, publishing `BO_PORT`) + Neon (Postgres), both permanently free as of
+2026-09. All BO screens now exist; next up is the `Dockerfile`.
 
 **Not live-verified — no local Postgres/Redis/Kafka in this dev
 environment, by choice** (see `docs/adr/0003`, `docs/adr/0005`): the real
@@ -72,48 +77,58 @@ install is needed.
 Then, from another shell:
 
 ```
+# BO (8080)
 curl http://localhost:8080/health
 # {"status":"UP"}
 
 curl http://localhost:8080/metrics
 # Prometheus text-format scrape, including health_check_requests_total
 
-curl -X POST http://localhost:8080/orders -H "Content-Type: application/json" -d "{\"customerId\":\"cust-1\",\"amount\":42.50}"
+# BO needs a session; set BO_ADMIN_USERNAME/BO_ADMIN_PASSWORD before ./gradlew run,
+# then log in and keep the cookie:
+curl -c cookies.txt -X POST http://localhost:8080/bo/auth/login \
+  -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"...\"}"
+curl -b cookies.txt http://localhost:8080/bo/devices
+
+# Order API (8083)
+curl -X POST http://localhost:8083/orders -H "Content-Type: application/json" -d "{\"customerId\":\"cust-1\",\"amount\":42.50}"
 # 201 {"customerId":"cust-1","amount":42.50,"id":1}
 ```
 
-Default HTTP port `8080`, Socket port `9090` — override with `HTTP_PORT` /
-`SOCKET_PORT`. On startup, the Order Summary Batch job runs once
-immediately (against the in-memory fake order data) and logs its report.
+See the port table above for defaults and the env vars that override them.
+On startup, the Order Summary Batch job runs once immediately (against the
+in-memory fake order data) and logs its report.
 
-### Bringing up real infra (Oracle/Redis/Kafka/Prometheus/Grafana)
+### Bringing up real infra (Postgres/Redis/Kafka/Prometheus/Grafana)
 
 ```
 docker compose up -d
 ```
 
-Then, in `Bootstrap.java`, swap the `InMemoryOrderRepository`/
-`InMemoryCacheClient`/`InMemoryEventPublisher` constructions for
-`MyBatisOrderRepository`/`RedissonCacheClient`/`KafkaEventPublisher`, and
-run `FlywayMigrator.migrate(...)` once against the Oracle datasource. This
-hasn't been done/tested here — no Docker in this dev environment (see
-`docs/adr/0003`).
+Then, in `Bootstrap.java`, swap the `InMemoryXxxRepository`/
+`InMemoryCacheClient`/`InMemoryEventPublisher` constructions for the
+`MyBatis*`/`RedissonCacheClient`/`KafkaEventPublisher` ones, and run
+`FlywayMigrator.migrate(...)` once against the Postgres datasource. This
+hasn't been done/tested here — no local database in this dev environment,
+by choice (see `docs/adr/0005`, `docs/adr/0007`).
 
 ## Structure
 
 ```
 src/main/java/com/sunmoon/platform/
   Bootstrap.java              composition root — manual wiring, no DI container
-  core/                       Core Runtime (Netty bootstrap, config)
-  transport/http/             REST transport (codec, router, endpoints)
-  transport/ws/                WebSocket transport
-  transport/socket/            raw Socket transport
-  batch/                       Job/Step/Chunk engine + Quartz scheduling
-  domain/order/                Order aggregate + OrderRepository port
-  infrastructure/persistence/  MyBatis+Oracle (real, unverified) / in-memory (fake, tested)
-  infrastructure/cache/        Redisson (real, unverified) / in-memory (fake, tested)
-  infrastructure/messaging/    Kafka (real, unverified) / in-memory (fake, tested)
-  observability/               Micrometer + OpenTelemetry wiring
+  core/                       Core Runtime (Netty listeners, config)
+  transport/http/             REST transport (router, listener specs, endpoints)
+  transport/http/bo/          BO auth + the AuthorizedEndpoint permission decorator
+  transport/http/bo/commoncode/, .../device/   BO screens (CRUD endpoints)
+  transport/ws/, transport/socket/             WebSocket and raw Socket transports
+  batch/                      Job/Step/Chunk engine + Quartz scheduling
+  domain/                     order, operator, commoncode, device — records + ports
+  infrastructure/persistence/ MyBatis+Postgres (real, unverified) / in-memory (fake, tested)
+  infrastructure/auth/        session store + BCrypt hashing
+  infrastructure/cache/       Redisson (real, unverified) / in-memory (fake, tested)
+  infrastructure/messaging/   Kafka (real, unverified) / in-memory (fake, tested)
+  observability/              Micrometer + OpenTelemetry wiring
 ```
 
 Grows one package at a time as each piece is actually built — see

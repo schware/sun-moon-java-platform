@@ -1,7 +1,6 @@
 package com.sunmoon.platform.transport.http.bo;
 
 import com.sunmoon.platform.core.CoreRuntime;
-import com.sunmoon.platform.core.RuntimeConfig;
 import com.sunmoon.platform.domain.operator.Action;
 import com.sunmoon.platform.domain.operator.OperatorRepository;
 import com.sunmoon.platform.domain.operator.Screen;
@@ -9,6 +8,7 @@ import com.sunmoon.platform.infrastructure.auth.InMemorySessionStore;
 import com.sunmoon.platform.infrastructure.auth.PasswordHasher;
 import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
+import com.sunmoon.platform.transport.http.HttpListenerSpec;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -25,6 +25,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -57,7 +58,8 @@ class BoAuthTest {
                 new AuthorizedEndpoint(Screen.COMMON_CODE, Action.VIEW, sessionStore, protectedEndpoint)
         );
 
-        CoreRuntime runtime = new CoreRuntime(RuntimeConfig.forTest(HTTP_PORT, SOCKET_PORT), routes);
+        CoreRuntime runtime = new CoreRuntime(
+                List.of(new HttpListenerSpec("test-bo", HTTP_PORT, routes, false)), SOCKET_PORT);
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

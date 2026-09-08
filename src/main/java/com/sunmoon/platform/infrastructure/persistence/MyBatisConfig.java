@@ -34,6 +34,7 @@ public final class MyBatisConfig {
         configuration.addMapper(OrderMapper.class);
         configuration.addMapper(OperatorMapper.class);
         configuration.addMapper(CommonCodeMapper.class);
+        configuration.addMapper(DeviceMapper.class);
         return new SqlSessionFactoryBuilder().build(configuration);
     }
 

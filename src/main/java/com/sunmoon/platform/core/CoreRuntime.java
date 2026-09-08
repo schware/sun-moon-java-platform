@@ -1,8 +1,7 @@
 package com.sunmoon.platform.core;
 
+import com.sunmoon.platform.transport.http.HttpListenerSpec;
 import com.sunmoon.platform.transport.http.HttpServerInitializer;
-import com.sunmoon.platform.transport.http.RestEndpoint;
-import com.sunmoon.platform.transport.http.RouteKey;
 import com.sunmoon.platform.transport.socket.SocketServerInitializer;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -12,51 +11,58 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * The Core Runtime: one process, one pair of Netty event-loop groups,
- * multiple listening ports — REST + WebSocket share the HTTP port
- * ({@link HttpServerInitializer}), raw Socket gets its own
- * ({@link SocketServerInitializer}). Batch (Quartz-triggered) runs on the
- * same JVM but off the event loop entirely — see {@code batch} package.
+ * several listening ports — one per {@link HttpListenerSpec} (BO and the
+ * Order API each get their own, see docs/adr/0009), plus the raw Socket
+ * port ({@link SocketServerInitializer}). Batch (Quartz-triggered) runs on
+ * the same JVM but off the event loop entirely — see {@code batch} package.
  */
 public final class CoreRuntime {
 
     private static final Logger log = LoggerFactory.getLogger(CoreRuntime.class);
 
-    private final RuntimeConfig config;
-    private final Map<RouteKey, RestEndpoint> httpRoutes;
+    private final List<HttpListenerSpec> httpListeners;
+    private final int socketPort;
 
-    public CoreRuntime(RuntimeConfig config, Map<RouteKey, RestEndpoint> httpRoutes) {
-        this.config = config;
-        this.httpRoutes = httpRoutes;
+    public CoreRuntime(List<HttpListenerSpec> httpListeners, int socketPort) {
+        this.httpListeners = List.copyOf(httpListeners);
+        this.socketPort = socketPort;
     }
 
     public void start() throws InterruptedException {
         EventLoopGroup bossGroup = new NioEventLoopGroup(1);
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         try {
-            Channel httpChannel = new ServerBootstrap()
-                    .group(bossGroup, workerGroup)
-                    .channel(NioServerSocketChannel.class)
-                    .childHandler(new HttpServerInitializer(httpRoutes))
-                    .bind(config.httpPort())
-                    .sync()
-                    .channel();
-            log.info("Core Runtime: REST + WebSocket listening on port {}", config.httpPort());
+            List<Channel> channels = new ArrayList<>();
 
-            Channel socketChannel = new ServerBootstrap()
+            for (HttpListenerSpec listener : httpListeners) {
+                channels.add(new ServerBootstrap()
+                        .group(bossGroup, workerGroup)
+                        .channel(NioServerSocketChannel.class)
+                        .childHandler(new HttpServerInitializer(listener.routes(), listener.webSocketEnabled()))
+                        .bind(listener.port())
+                        .sync()
+                        .channel());
+                log.info("Core Runtime: {} listening on port {}{}",
+                        listener.name(), listener.port(), listener.webSocketEnabled() ? " (REST + WebSocket)" : " (REST)");
+            }
+
+            channels.add(new ServerBootstrap()
                     .group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new SocketServerInitializer())
-                    .bind(config.socketPort())
+                    .bind(socketPort)
                     .sync()
-                    .channel();
-            log.info("Core Runtime: Socket listening on port {}", config.socketPort());
+                    .channel());
+            log.info("Core Runtime: Socket listening on port {}", socketPort);
 
-            httpChannel.closeFuture().sync();
-            socketChannel.closeFuture().sync();
+            for (Channel channel : channels) {
+                channel.closeFuture().sync();
+            }
         } finally {
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
