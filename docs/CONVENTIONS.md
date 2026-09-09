@@ -89,6 +89,30 @@ Expected: `1 1` on every row.
 `starter-security` (bo only), and resilience4j (order only). Those are
 choices, not drift.
 
+### BO's deliberate differences
+
+BO is the only service here with a user interface, and three things follow
+from that. They are decisions (ADR-0005), not drift — but check them
+against this list before "fixing" them:
+
+| | BO | the others |
+|---|---|---|
+| API base path | `/api/*` | at the context-path root |
+| `/` | serves the React app | redirects to Swagger UI |
+| `frontend/` | Vite + React + TypeScript, built into `src/main/resources/static` | none |
+| Dockerfile | extra `node:20-alpine` stage | two stages |
+
+The API prefix is the one to understand: BO's SPA route `/board` and its
+endpoint `GET /board` were the same URL, so refreshing a screen returned
+JSON. Any future service that grows a UI will hit this the same way.
+
+```bash
+for s in $SERVICES; do
+  printf '%-9s frontend=%s api-prefix=%s
+' "$s"     "$( [ -d $s/frontend ] && echo yes || echo no )"     "$(grep -ho 'RequestMapping("[^"]*")' $s/src/main/java/com/sunmoon/*/transport/http/*Controller.java 2>/dev/null | head -1 | cut -d'"' -f2)"
+done
+```
+
 ---
 
 ## 3. Ports and context-paths — one line each
@@ -198,7 +222,9 @@ Every service exposes exactly `health,prometheus,info` with
 `show-details: always`, and every service has:
 
 - `RootRedirectController` — `/` redirects to Swagger UI, so the
-  context-path root isn't a Whitelabel 404.
+  context-path root isn't a Whitelabel 404. **BO is the exception**: it
+  has a React console, so its `/` serves the app and it has no
+  `RootRedirectController` (ADR-0005).
 - `RedactedDiskSpaceHealthIndicator` + `MetricsConfig` + `PathRedactor` —
   both `/actuator/health` and `/actuator/prometheus` would otherwise leak
   the container's absolute working directory. **Copying these three files

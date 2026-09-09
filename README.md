@@ -14,7 +14,7 @@ on trust.
 | **Order** | [`order/`](order) → [sun-moon-java-platform-order](https://github.com/schware/sun-moon-java-platform-order) | Order creation, publishes `OrderCreated` | Postgres (JSONB) |
 | **KDS** | [`kds/`](kds) → [sun-moon-java-platform-kds](https://github.com/schware/sun-moon-java-platform-kds) | Kitchen ticket queue, publishes `OrderReady` | Redis |
 | **Delivery** | [`delivery/`](delivery) → [sun-moon-java-platform-delivery](https://github.com/schware/sun-moon-java-platform-delivery) | Courier assignment/tracking, publishes `OrderDelivered` | Postgres (JSONB) |
-| **BO** | [`bo/`](bo) → [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) | Back Office — operators, 공통코드, device master data | Postgres |
+| **BO** | [`bo/`](bo) → [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) |  Back Office — 운영자, 공지사항, 공통코드, 장비 (React 콘솔 포함) | Postgres |
 
 Archived predecessors:
 [sun-moon-java-platform-netty](https://github.com/schware/sun-moon-java-platform-netty)
@@ -79,6 +79,9 @@ Docker approach ever needs to be un-done.
 - [`docs/adr/0004`](docs/adr/0004-bo-joins-this-family-as-a-spring-service.md)
   — why BO was rebuilt on Spring and joined this family, rather than
   staying the one service built on raw Netty.
+- [`docs/adr/0005`](docs/adr/0005-bo-ships-its-own-react-console.md) — why
+  BO's React/TypeScript console ships inside its own jar, and why that
+  forced the API under `/api`.
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
