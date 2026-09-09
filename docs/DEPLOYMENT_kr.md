@@ -1,112 +1,186 @@
 *🇬🇧 English version: [DEPLOYMENT.md](DEPLOYMENT.md)*
 
-# 배포 절차 — Render + Neon
+# 배포 절차 — Debian 서버
 
-배포 대상과 그 근거: [`adr/0007`](adr/0007-deployment-target-render-neon-free-forever.md).
-두 서비스 모두 2026-09 기준으로 체험판 크레딧이 아니라 영구 무료다.
+배포 대상과 근거: [`adr/0012`](adr/0012-deploy-to-own-debian-server.md).
+이미 그 서버에서 쓰고 있는 관례(`Debian-Setting` 저장소 `docs/docker.md`)를
+그대로 따릅니다 — `~/apps/docker/`에 clone, 서버에서 이미지 빌드,
+`--network host`로 컨테이너 하나 실행.
 
-저장소 쪽 준비는 끝났고, 남은 것은 계정이 필요한 부분이라 본인만 할 수
-있다. 1~2단계가 직접 하실 일이고, 3단계는 버튼 하나, 4~5단계는 확인이다.
+| | |
+|---|---|
+| 호스트 | `192.168.0.2`, 사용자 `schware`, 공개키 SSH |
+| 하드웨어 | Debian 11, i5 M 480 (2010, 4코어), RAM 5.6GB |
+| 이미 있는 것 | JDK 21, Docker 20.10.5, PostgreSQL `:5432`, Redis `:6379` |
+
+## 포트 배정
+
+| 포트 | 서비스 |
+|---|---|
+| 8080 / 8081 / 8082 | Spring Order / KDS / Delivery — **건드리지 않음** |
+| **8083** | 이 플랫폼 — Order API (+ WebSocket `/ws`) |
+| **8084** | 이 플랫폼 — BO |
+| **9090** | 이 플랫폼 — Socket |
+
+`BO_PORT`만 덮어씁니다. `API_PORT`와 `SOCKET_PORT`는 기본값이 이미
+8083, 9090입니다.
 
 ---
 
-## 1. Neon 데이터베이스 생성
+## 1단계 — sudo가 필요한 작업 (직접 해주셔야 합니다)
 
-1. <https://neon.com>에서 가입한다(무료 플랜, 카드 불필요).
-2. 프로젝트를 만든다 — 이름은 아무거나, region은 Render region과 가까운
-   곳으로.
-3. 연결 정보에서 **host**, **database**, **user**, **password**를 확인한다.
-4. JDBC URL을 만든다(Neon은 `postgresql://` 형태로 보여주는데, JDBC는
-   `jdbc:` 접두사와 `sslmode=require`가 필요하다):
+`schware`는 sudo에 비밀번호가 필요해서 이 세션에서는 실행할 수 없습니다.
+둘 다 한 줄짜리입니다.
 
-   ```
-   jdbc:postgresql://<host>/<database>?sslmode=require
-   ```
-
-테이블을 직접 만들 필요는 **없다** — 첫 기동 때 Flyway가 `V1`~`V4`를
-자동으로 실행한다(`Bootstrap.buildRepositories`).
-
-## 2. Render 서비스 생성
-
-1. <https://render.com>에 가입하고, `schware/sun-moon-java-platform`을
-   소유한 GitHub 계정을 연결한다.
-2. **New → Blueprint**에서 그 저장소를 고르고, 브랜치를 **`master`** 로
-   지정한다 — ⚠️ `main`이 아니다. `main`에는 무관한 Spring Boot
-   프로젝트가 들어 있다(`adr/0009`).
-3. Render가 [`render.yaml`](../render.yaml)을 읽어 서비스를 만든다.
-   `sync: false`로 표시된 다섯 개 변수를 입력하라고 물어본다:
-
-   | 변수 | 값 |
-   |---|---|
-   | `POSTGRES_JDBC_URL` | 1.4에서 만든 URL |
-   | `POSTGRES_USER` | Neon user |
-   | `POSTGRES_PASSWORD` | Neon password |
-   | `BO_ADMIN_USERNAME` | 원하는 값 — 최초 BO 로그인 계정 |
-   | `BO_ADMIN_PASSWORD` | 원하는 값 — 생성기로 만든 비밀번호 권장 |
-
-   이 값들은 Render 대시보드에만 입력되고 저장소에는 커밋되지 않는다.
-
-## 3. 배포
-
-Render가 [`Dockerfile`](../Dockerfile)을 빌드하고(멀티스테이지: JDK로
-빌드, JRE로 실행) 서비스를 기동한다. 첫 빌드는 몇 분 걸리고, 이후
-`master`에 push하면 자동 배포된다.
-
-## 4. 확인
+**1a. 데이터베이스 생성.** `sunmoon` 역할에 `CREATEDB` 권한이 없어서
+postgres 슈퍼유저가 필요합니다:
 
 ```bash
-BASE=https://<서비스명>.onrender.com
+sudo -u postgres createdb -O sunmoon platform_service
+```
 
-curl $BASE/health
-# {"status":"UP"}
+이게 전부입니다 — 테이블은 만들 필요 없습니다. DB만 있으면 첫 기동 때
+Flyway가 `V1`~`V4`를 전부 생성합니다.
 
-curl -c cookies.txt -X POST $BASE/bo/auth/login \
+**1b. 방화벽 개방** (UFW가 켜져 있어서, 이걸 안 하면 서버 안에서만
+응답합니다):
+
+```bash
+sudo ufw allow 8083/tcp && sudo ufw allow 8084/tcp && sudo ufw allow 9090/tcp
+sudo ufw status numbered
+```
+
+## 2단계 — clone과 빌드 (sudo 불필요)
+
+⚠️ **`-b master`** — 이 저장소의 기본 브랜치 `main`은 무관한 Spring Boot
+프로젝트입니다(`adr/0009`).
+⚠️ **`docker build`에 `--network host`** — 이 서버는 Docker 브릿지 DNS가
+깨져 있어서 안 붙이면 `FROM` 단계에서 실패합니다.
+
+```bash
+mkdir -p ~/apps/docker && cd ~/apps/docker
+git clone -b master https://github.com/schware/sun-moon-java-platform.git sun-moon-java-platform-netty
+cd sun-moon-java-platform-netty
+docker build --network host -t sun-moon-netty .
+```
+
+이 CPU에서 **5~10분** 걸립니다. 멈춘 게 아니고, `docker images`로 새
+레이어가 계속 생기는지 확인하면서 기다리시면 됩니다.
+
+## 3단계 — 설정과 실행
+
+자격 증명은 `docker run` 명령줄이 아니라 env 파일에 둡니다 — 셸 히스토리와
+`ps` 출력에 남지 않게 하려는 것입니다:
+
+```bash
+cat > ~/apps/docker/sun-moon-java-platform-netty/.env <<'EOF'
+BO_PORT=8084
+WORKER_THREADS=8
+COOKIE_SECURE=false
+POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/platform_service
+POSTGRES_USER=sunmoon
+POSTGRES_PASSWORD=sunmoon_dev_pw
+POSTGRES_POOL_SIZE=5
+BO_ADMIN_USERNAME=admin
+BO_ADMIN_PASSWORD=<직접 정하세요>
+EOF
+chmod 600 ~/apps/docker/sun-moon-java-platform-netty/.env
+
+docker run -d --name sun-moon-netty --network host --memory=512m \
+  --restart unless-stopped \
+  --env-file ~/apps/docker/sun-moon-java-platform-netty/.env \
+  sun-moon-netty
+```
+
+**`COOKIE_SECURE=false`는 의도된 것입니다** — 이 서버는 LAN 주소의 평문
+HTTP입니다. `true`로 두면 브라우저가 session cookie를 아예 안 보내서 BO
+로그인이 조용히 실패합니다.
+
+**DB 없이 먼저 띄우려면**(1a 없이도 빌드·컨테이너·BO 화면 전부 검증
+가능) `POSTGRES_*` 네 줄을 빼면 됩니다. 로그에
+`using in-memory fake repositories`가 찍히고 재기동 시 데이터가 사라집니다 —
+그 단계에서는 괜찮지만, 그대로 두면 안 됩니다.
+
+## 4단계 — 확인
+
+```bash
+docker logs -f sun-moon-netty
+```
+
+어느 쪽으로 돌고 있는지 판가름하는 줄:
+
+```
+POSTGRES_JDBC_URL set — using PostgreSQL repositories (jdbc:postgresql://...)
+```
+
+DB를 기대했는데 `using in-memory fake repositories`가 나오면 env 파일이
+컨테이너에 전달되지 않은 것이고, **재기동 때마다 데이터가 사라집니다** —
+더 진행하기 전에 고쳐야 합니다.
+
+그다음 LAN의 아무 PC에서나:
+
+```bash
+BASE=http://192.168.0.2:8084
+
+curl $BASE/health                      # {"status":"UP"}
+curl $BASE/metrics                     # Prometheus 텍스트 포맷
+
+curl -c c.txt -X POST $BASE/bo/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"<BO_ADMIN_USERNAME>","password":"<BO_ADMIN_PASSWORD>"}'
-# 200 {"username":"...","displayName":"Super Admin","superAdmin":true}
+  -d '{"username":"admin","password":"<BO_ADMIN_PASSWORD>"}'
 
-curl -b cookies.txt $BASE/bo/devices
-# [] — 비어 있지만, 200이면 session cookie와 Postgres가 모두 동작한다는 뜻
+curl -b c.txt $BASE/bo/devices          # 200에 [] → session과 DB 둘 다 정상
 
-curl -b cookies.txt -X POST $BASE/bo/common-code \
+curl -b c.txt -X POST $BASE/bo/common-code \
   -H "Content-Type: application/json" \
   -d '{"groupCode":"DEVICE_TYPE","code":"POS","name":"POS","sortOrder":1,"active":true}'
-# 201 — in-memory fake와 달리 재기동해도 남아 있는 행
+# 201 — 컨테이너를 재기동하고 다시 조회해보면, DB가 붙어 있으면 남아 있습니다
+
+curl -X POST http://192.168.0.2:8083/orders \
+  -H "Content-Type: application/json" -d '{"customerId":"c1","amount":10.5}'   # Order API
+printf 'ping' | nc 192.168.0.2 9090     # Socket echo → "ping"
 ```
 
-Render 로그에서 실제 adapter가 살아 있음을 확인해주는 줄은 이것이다:
+## 5단계 — 랜딩 페이지 (선택)
 
+`:8000` 랜딩 페이지는 정적 파일이라 재시작 없이 바로 반영됩니다:
+
+```bash
+vi ~/apps/docker/nginx/html/index.html   # 카드 추가 → http://192.168.0.2:8084/health
 ```
-Bootstrap - POSTGRES_JDBC_URL set — using PostgreSQL repositories (jdbc:postgresql://...)
+
+## 코드 변경 후 재배포
+
+```bash
+cd ~/apps/docker/sun-moon-java-platform-netty
+git pull
+docker build --network host -t sun-moon-netty .
+docker stop sun-moon-netty && docker rm sun-moon-netty
+docker run -d --name sun-moon-netty --network host --memory=512m \
+  --restart unless-stopped --env-file ./.env sun-moon-netty
 ```
 
-만약 `using in-memory fake repositories`로 나온다면 `POSTGRES_JDBC_URL`이
-서비스에 전달되지 않은 것이고, **재기동 때마다 데이터가 조용히
-사라진다.** 더 진행하기 전에 변수부터 고쳐야 한다.
+**재배포할 때마다 BO 사용자가 전원 로그아웃됩니다** — session이 메모리에
+있기 때문입니다(`InMemorySessionStore`). 이 호스트에 Redis가 이미 떠
+있으니 `RedisSessionStore`를 만들면 해결되고, 그게 다음 작업으로 가장
+자연스럽습니다.
 
-## 5. 이 배포가 증명하는 것과 증명하지 않는 것
+## 이 배포가 증명하는 것
 
-**증명한다**(전부 처음으로): Dockerfile이 빌드된다; MyBatis mapper들과
-`MyBatisConfig`, Flyway migration 4개가 실제 PostgreSQL에서 실행된다;
-BO session cookie가 실제 TLS 위에서 `Secure`로 동작한다; 플랫폼 전체가
-노트북이 아닌 곳에서 돌아간다.
+처음으로 실행되는 것들: `Dockerfile`, 모든 MyBatis mapper, Flyway
+migration 4개, 그리고 노트북이 아닌 하드웨어 위에서의 플랫폼 전체.
 
-**증명하지 않는다**: 처리량이나 1,000~10,000 동시 접속 목표. Render 무료
-플랜은 작은 공유 인스턴스이고 15분 유휴 시 잠들며(재기동 약 1분), Neon
-무료 컴퓨팅도 0으로 축소된다. 보여줄 수 있는 URL로는 충분하지만 부하
-테스트 환경은 아니다.
-
-**이 배포에 포함되지 않는 것**: Order API(8083)와 Socket(9090) listener는
-컨테이너 안에서 계속 돌지만 Render는 port 하나만 공개하므로 외부에서
-접근되지 않는다. 의도된 것이다 — 배포 대상 표면은 BO다(`adr/0009`).
+**처리량은 증명하지 않습니다.** 2010년형 4코어 CPU에 5.6GB RAM을 다른
+컨테이너 4개와 나눠 쓰는 환경은 1,000~10,000 동시 접속을 검증할 자리가
+아닙니다.
 
 ## 알려진 제약
 
-- **무료 인스턴스는 잠든다.** 유휴 후 첫 요청은 약 1분 걸린다.
-- **Session이 프로세스 안에 있다.** `InMemorySessionStore`가 유일한
-  구현이라, 배포/재기동 때마다 전원 로그아웃되고 인스턴스를 하나 이상으로
-  늘릴 수 없다. `RedisSessionStore`가 생기기 전까지는 그렇다.
-- **CORS가 아직 없다.** 다른 origin의 브라우저 Frontend는 CORS(credentials
-  포함)가 붙기 전까지 BO를 호출할 수 없다.
-- **Neon 무료 한도**: 프로젝트당 스토리지 0.5GB, 월 컴퓨팅 100시간.
-  현재 규모에는 충분하지만, 실제 데이터가 쌓이기 전에 알아둘 것.
+- **Session이 프로세스 안에 있습니다** — 위 참고.
+- **CORS가 없어서** 다른 origin의 브라우저 Frontend는 아직 BO를 호출할 수
+  없습니다.
+- **LAN 평문 HTTP.** LAN 밖으로 노출한다면 TLS가 필요하고, 그때
+  `COOKIE_SECURE`도 같이 `true`로 바꿔야 합니다.
+- 공개 URL이 필요해지면 대안은 Render + Neon입니다 —
+  [`adr/0007`](adr/0007-deployment-target-render-neon-free-forever.md)에
+  조사 내용이 남아 있습니다.

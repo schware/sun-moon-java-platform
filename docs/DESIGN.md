@@ -75,8 +75,11 @@ One process. One `NioEventLoopGroup` boss (1 thread) + one worker group
 | 9090 | Socket | raw TCP (echo) | — | `SOCKET_PORT` |
 
 `/health` is on both HTTP listeners deliberately: each is independently
-probeable. BO is the port published when deployed (ADR-0007), which is why
-`/metrics` sits there.
+probeable. `/metrics` sits on BO because BO is the operational surface.
+
+The ports above are the **code defaults**, used in local development. On
+the deployment target they are remapped around services already running
+there — BO moves to 8084 via `BO_PORT`; see `DEPLOYMENT.md` and ADR-0012.
 
 **Threading.** Event-loop threads run the codec and the router only.
 `RestEndpoint.handle()` is dispatched to a **bounded worker pool**
@@ -308,7 +311,7 @@ Ordered by what would bite first in production.
    engages and fails loudly: running the packaged app with
    `POSTGRES_JDBC_URL` pointing at nothing exits with a HikariCP failure
    rather than silently falling back to fakes. First real exercise is the
-   Render+Neon deployment (ADR-0011, `DEPLOYMENT.md`).
+   deployment to the Debian server (ADR-0012, `DEPLOYMENT.md`).
 2. **`SessionStore` has no real adapter.** Only `InMemorySessionStore`
    exists, so sessions die with the process and cannot be shared across
    instances — meaning the deployed service cannot scale past one
@@ -330,8 +333,8 @@ Ordered by what would bite first in production.
 7. **The Dockerfile has never been built** — no Docker here (ADR-0003).
    The packaged `installDist` output it runs *is* verified to boot.
 8. **Not deployed.** Everything in the repo is ready (ADR-0011,
-   `render.yaml`, `DEPLOYMENT.md`); the remaining steps need Neon and
-   Render accounts.
+   ADR-0012, `DEPLOYMENT.md`); the remaining steps need `sudo` on the
+   target server — creating the database and opening the firewall.
 
 ## 13. Decision index
 
@@ -343,11 +346,12 @@ Ordered by what would bite first in production.
 | [0004](adr/0004-bo-endpoints-session-auth.md) | BO scope, session auth, 3-tier permissions |
 | [0005](adr/0005-switch-oracle-to-postgres.md) | Oracle → PostgreSQL; no local DB install |
 | [0006](adr/0006-bo-auth-built-and-verified.md) | BO auth built and verified |
-| [0007](adr/0007-deployment-target-render-neon-free-forever.md) | Deploy to Render + Neon |
+| [0007](adr/0007-deployment-target-render-neon-free-forever.md) | Deploy to Render + Neon (superseded by 0012) |
 | [0008](adr/0008-common-code-crud-and-method-aware-routing.md) | Common Code CRUD; method-aware routing |
 | [0009](adr/0009-device-crud-and-port-separation.md) | Device CRUD; BO/API port split |
 | [0010](adr/0010-run-endpoints-off-the-event-loop.md) | Endpoints run on a bounded worker pool |
 | [0011](adr/0011-deployment-mechanics.md) | Dockerfile, PORT, adapter selection, Secure cookie |
+| [0012](adr/0012-deploy-to-own-debian-server.md) | Deploy to the owner's Debian server instead |
 
 The deployment runbook is [`DEPLOYMENT.md`](DEPLOYMENT.md).
 

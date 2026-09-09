@@ -11,7 +11,7 @@ engine, data model, and an honest list of what isn't built yet. Start
 there. For *why* each decision was made, see [`docs/adr/`](docs/adr/).
 
 🚀 **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** ([한국어](docs/DEPLOYMENT_kr.md)) —
-runbook for deploying to Render + Neon (both permanently free).
+runbook for deploying to the owner's Debian server.
 
 This is the Java counterpart to
 [`sun-moon-python-platform`](../Python) and [`sun-moon-c-server`](../C) —
@@ -38,9 +38,9 @@ C/C++ sides.
 - **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
 - **Metrics**: Micrometer → Prometheus text format; **Tracing**: OpenTelemetry spans (logging exporter)
 
-**Ready to deploy, not yet deployed**: `Dockerfile`, `render.yaml` and a
-runbook are in place (`docs/adr/0007`, `docs/adr/0011`); the remaining
-steps need Neon and Render accounts. Endpoints run on a bounded worker
+**Ready to deploy, not yet deployed**: `Dockerfile` and a runbook are in
+place (`docs/adr/0011`, `docs/adr/0012`); the target is the owner's own
+Debian server, and the remaining steps need `sudo` there. Endpoints run on a bounded worker
 pool rather than the event loop (`docs/adr/0010`), so the real JDBC-backed
 adapters can be switched on — setting `POSTGRES_JDBC_URL` is the switch.
 
@@ -50,7 +50,7 @@ environment, by choice** (see `docs/adr/0003`, `docs/adr/0005`): the real
 (PostgreSQL, swapped from Oracle), `RedissonCacheClient` (Redis), and
 `KafkaEventPublisher` (Kafka) adapters exist and compile, but `Bootstrap`
 wires in their in-memory fakes by default, and no test exercises the real
-ones. Verification is deferred to the actual Render+Neon deployment. A
+ones. Verification is deferred to the actual server deployment. A
 `docker-compose.yml` is included for local/CI use if that's ever wanted.
 
 ## Stack

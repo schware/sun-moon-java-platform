@@ -73,8 +73,12 @@ Python, C, Java로 증명한다.
 | 9090 | Socket | raw TCP (echo) | — | `SOCKET_PORT` |
 
 `/health`를 두 HTTP listener 모두에 둔 건 의도적이다 — 각각 독립적으로
-probe할 수 있어야 한다. 배포 시 공개되는 port가 BO이고(ADR-0007), 그래서
-`/metrics`도 BO 쪽에 있다.
+probe할 수 있어야 한다. `/metrics`가 BO 쪽에 있는 건 BO가 운영 표면이기
+때문이다.
+
+위 port는 **코드 기본값**으로 로컬 개발 기준이다. 실제 배포 대상에서는
+이미 돌고 있는 서비스들에 맞춰 재배치된다 — BO는 `BO_PORT`로 8084로
+옮긴다. `DEPLOYMENT.md`와 ADR-0012 참고.
 
 **Threading.** Event-loop thread는 codec과 router만 실행한다.
 `RestEndpoint.handle()`은 **제한된 크기의 worker pool**
@@ -302,8 +306,8 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
    `MyBatisConfig`가 컴파일은 되지만 실제 PostgreSQL에서 실행된 적이
    없다. 다만 전환 스위치가 동작하고 **조용히 fake로 흘러가지 않는다는
    것**은 확인했다 — 패키징된 앱을 `POSTGRES_JDBC_URL`이 가리키는 DB 없이
-   실행하면 HikariCP 오류로 즉시 종료한다. 첫 실전은 Render+Neon
-   배포다(ADR-0011, `DEPLOYMENT.md`).
+   실행하면 HikariCP 오류로 즉시 종료한다. 첫 실전은 Debian 서버
+   배포다(ADR-0012, `DEPLOYMENT.md`).
 2. **`SessionStore`에 실제 adapter가 없다.** `InMemorySessionStore`만
    있어서 session이 프로세스와 함께 사라지고 인스턴스 간 공유도 안 된다 —
    즉 배포된 서비스를 인스턴스 하나 이상으로 늘릴 수 없고, 배포할 때마다
@@ -321,8 +325,9 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
    동작한다는 것만 증명하며, 프로토콜은 없다.
 7. **Dockerfile을 빌드해본 적이 없다** — 이 환경에 Docker가 없다(ADR-0003).
    다만 그것이 실행하는 `installDist` 산출물이 정상 기동하는 것은 확인했다.
-8. **배포되지 않았다.** 저장소 쪽 준비는 끝났고(ADR-0011, `render.yaml`,
-   `DEPLOYMENT.md`), 남은 단계는 Neon과 Render 계정이 필요하다.
+8. **배포되지 않았다.** 저장소 쪽 준비는 끝났고(ADR-0011, ADR-0012,
+   `DEPLOYMENT.md`), 남은 단계는 대상 서버에서 `sudo`가 필요하다 —
+   데이터베이스 생성과 방화벽 개방.
 
 ## 13. 결정 색인
 
@@ -334,11 +339,12 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
 | [0004](adr/0004-bo-endpoints-session-auth.md) | BO 범위, session 인증, 3단계 권한 |
 | [0005](adr/0005-switch-oracle-to-postgres.md) | Oracle → PostgreSQL, 로컬 DB 미설치 |
 | [0006](adr/0006-bo-auth-built-and-verified.md) | BO 인증 구현 및 검증 |
-| [0007](adr/0007-deployment-target-render-neon-free-forever.md) | Render + Neon 배포 |
+| [0007](adr/0007-deployment-target-render-neon-free-forever.md) | Render + Neon 배포 (0012으로 대체됨) |
 | [0008](adr/0008-common-code-crud-and-method-aware-routing.md) | 공통코드 CRUD, 메서드 인식 라우팅 |
 | [0009](adr/0009-device-crud-and-port-separation.md) | 장비 CRUD, BO/API port 분리 |
 | [0010](adr/0010-run-endpoints-off-the-event-loop.md) | Endpoint를 worker pool에서 실행 |
 | [0011](adr/0011-deployment-mechanics.md) | Dockerfile, PORT, adapter 선택, Secure cookie |
+| [0012](adr/0012-deploy-to-own-debian-server.md) | Render 대신 본인 Debian 서버에 배포 |
 
 배포 절차는 [`DEPLOYMENT.md`](DEPLOYMENT.md)에 있다.
 
