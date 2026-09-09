@@ -5,6 +5,7 @@ import com.sunmoon.platform.domain.terminal.TerminalType;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.handler.codec.http.websocketx.CloseWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import org.slf4j.Logger;
@@ -19,6 +20,18 @@ import org.slf4j.LoggerFactory;
  * the registry.
  */
 public final class TerminalFrameHandler extends SimpleChannelInboundHandler<TextWebSocketFrame> {
+
+    /**
+     * Close status for "another connection took this device id".
+     *
+     * <p>In the private 4000-4999 range, and it exists because closing
+     * silently was worse than useless: two windows using one device id
+     * each displaced the other, each displacement looked like a dropped
+     * connection, each reconnected — and the two screens knocked each
+     * other offline forever while burning a core. A client that is told
+     * *why* can stop and say so.
+     */
+    public static final int CLOSE_REPLACED = 4001;
 
     private static final Logger log = LoggerFactory.getLogger(TerminalFrameHandler.class);
 
@@ -43,8 +56,10 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
                     // A device reconnecting displaces its old channel. Closing
                     // it here, off the registry, keeps that map free of I/O.
                     .ifPresent(displaced -> {
-                        log.info("terminal {} reconnected; closing the previous connection", deviceId);
-                        displaced.close();
+                        log.info("terminal {} claimed by a new connection; closing the previous one", deviceId);
+                        displaced.writeAndFlush(new CloseWebSocketFrame(
+                                        CLOSE_REPLACED, "device id claimed by another connection"))
+                                .addListener(future -> displaced.close());
                     });
 
             log.info("terminal connected: {} ({} at {}) — {} now connected",
