@@ -22,6 +22,41 @@ no throughput requirement, and hand-writing session auth for it bought
 nothing (`docs/adr/0015`). The Netty implementation is archived as
 [sun-moon-platform-bo-netty](https://github.com/schware/sun-moon-platform-bo-netty).
 
+## This runtime is the Device Server
+
+This is what the runtime is *for* — the thing ADR-0014 left as "business
+undecided" (`docs/adr/0016`). It holds the WebSocket connections for
+terminals in the field (POS, KDS, DID), subscribes to the Spring
+[Order service](https://github.com/schware/sun-moon-java-platform-order)'s
+Redis events, and pushes each one to the terminals that should see it —
+routed **per store**, because every shop has its own `pos-01`.
+
+```
+Order (Spring, :8083) ──Redis 'order-events'──▶ Device Server (:8087)
+                                                       │
+                          WebSocket, store-scoped ─────┼───▶ POS / KDS / DID terminals
+                          REST proxy (fetch, accept) ──┘
+```
+
+- A terminal identifies itself **at the handshake**
+  (`/ws?deviceId=pos-01&storeId=store-01&type=POS`) — a wrong or missing
+  id is refused with HTTP 400, never an open socket that silently never
+  receives anything.
+- **The WebSocket carries a nudge, not the data.** A frame means
+  "something changed"; the terminal then fetches the current list
+  through this server's REST proxy. That is what lets a terminal that
+  was briefly offline reconnect to the truth instead of to whatever
+  frames it missed.
+- An order placed at a store with **no terminal connected is refused
+  immediately** — but a terminal seen within the last few minutes still
+  counts as present, so a dropped wifi connection costs a delay, not a
+  customer (`TERMINAL_GRACE`, default 3 minutes).
+- **Verified live, end to end**: a real WebSocket client connecting as a
+  named terminal, an order placed with no terminal present being
+  auto-rejected, one placed with a terminal connected being pushed to it,
+  and an accept call landing in Order as `ACCEPTED` with `acceptedBy`
+  set — confirmed by querying Order directly.
+
 📐 **[`docs/DESIGN.md`](docs/DESIGN.md)** ([한국어](docs/DESIGN_kr.md)) — the
 as-built design: runtime topology, layering, batch engine, data model, and
 an honest list of what isn't built yet. Start there. For *why* each decision was made, see [`docs/adr/`](docs/adr/).
@@ -37,35 +72,38 @@ C/C++ sides.
 
 ## Status
 
-**Working scaffold, not a finished system.** Verified live (see
-`docs/adr/0003`):
+**Deployed, and its core purpose is live-verified** (see `docs/adr/0016`).
 
-**Ports** (`docs/adr/0013`) — two listeners, this runtime's slots in the
-family-wide scheme:
+**Ports** (`docs/adr/0013`, `docs/adr/0016`) — two listeners:
 
 | Port | Listener | Serves | Override |
 |---|---|---|---|
-| 8083 | API | `/health`, `/metrics`, `/orders`, WebSocket `/ws` | `API_PORT` |
+| 8087 | API | `/health`, `/metrics`, `/terminals`, `/orders` (proxy), WebSocket `/ws` | `API_PORT` |
 | 9011 | Socket | raw TCP (echo) | `SOCKET_PORT` |
 
-- **Order API**: `POST /orders` (Jakarta Bean Validation + Resilience4j), WebSocket `/ws` (echo)
+8083 was this runtime's port under ADR-0013/0014's "reserved, undecided"
+framing; it moved to 8087 once the Device Server role made clear that
+8083 belongs to the Spring Order service permanently.
+
+- **Terminals**: `GET /terminals` (who's connected), `POST /terminals/push`
+  and `POST /terminals/broadcast` (send to one device or every terminal of
+  a kind at a store) — mostly an operator/debug surface now that Order's
+  events drive pushes automatically.
+- **Order proxy**: `GET /orders` and `POST /orders/status` forward to the
+  Spring Order service so a terminal never needs to know where it lives.
 - **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
 - **Metrics**: Micrometer → Prometheus text format; **Tracing**: OpenTelemetry spans (logging exporter)
 
-**Ready to deploy, not yet deployed**: `Dockerfile` and a runbook are in
-place (`docs/adr/0011`, `docs/adr/0012`); the target is the owner's own
-Debian server, and the remaining steps need `sudo` there. Endpoints run on a bounded worker
-pool rather than the event loop (`docs/adr/0010`), so the real JDBC-backed
-adapters can be switched on — setting `POSTGRES_JDBC_URL` is the switch.
+**Redis Pub/Sub is live-verified** — this is the first real exercise of
+the Redisson adapter, subscribing to Order's events and pushing to
+connected terminals on the deployed server.
 
-**Not live-verified — no local Postgres/Redis/Kafka in this dev
-environment, by choice** (see `docs/adr/0003`, `docs/adr/0005`): the real
-`MyBatisOrderRepository` (PostgreSQL, swapped from Oracle),
-`RedissonCacheClient` (Redis), and
-`KafkaEventPublisher` (Kafka) adapters exist and compile, but `Bootstrap`
-wires in their in-memory fakes by default, and no test exercises the real
-ones. Verification is deferred to the actual server deployment. A
-`docker-compose.yml` is included for local/CI use if that's ever wanted.
+**Still not live-verified** — no local Postgres/Kafka in this dev
+environment, by choice (see `docs/adr/0003`, `docs/adr/0005`): the real
+`MyBatisOrderRepository` (PostgreSQL) and `KafkaEventPublisher` (Kafka)
+adapters exist and compile, but back the runtime's **legacy**
+`domain/order` module (see Known Gaps in `docs/DESIGN.md` §12) — not the
+real order flow, which lives entirely in the Spring Order service now.
 
 ## Stack
 
@@ -73,8 +111,8 @@ ones. Verification is deferred to the actual server deployment. A
 |---|---|---|
 | Core Runtime / Transport | Netty (raw — no Reactor Netty, no Spring WebFlux) | Yes |
 | Batch Scheduler | Quartz (triggers a hand-rolled Job/Step/Chunk engine) | Yes |
-| Persistence | MyBatis + PostgreSQL, HikariCP, Flyway | No — see `docs/adr/0005` |
-| Cache / Session / Lock | Redis, Redisson | No — see `docs/adr/0003` |
+| Persistence | MyBatis + PostgreSQL, HikariCP, Flyway | No — backs the legacy `domain/order` module only |
+| Cache / Session / Lock | Redis, Redisson | **Pub/Sub: yes** (terminal event routing). Cache client: no |
 | Event Bus | Kafka | No — see `docs/adr/0003` |
 | Logging | Logback | Yes |
 | Monitoring | Micrometer, Prometheus, Grafana | Micrometer/Prometheus format yes; Grafana not yet |
@@ -91,7 +129,7 @@ No Spring anywhere — see [`docs/adr/0002`](docs/adr/0002-ddd-enterprise-runtim
 Requires JDK 21+. The Gradle wrapper is committed, so no local Gradle
 install is needed.
 
-```
+```bash
 ./gradlew build
 ./gradlew test
 ./gradlew run
@@ -99,33 +137,36 @@ install is needed.
 
 Then, from another shell:
 
-```
-curl http://localhost:8083/health
+```bash
+curl http://localhost:8087/health
 # {"status":"UP"}
 
-curl http://localhost:8083/metrics
-# Prometheus text-format scrape, including health_check_requests_total
+curl http://localhost:8087/terminals
+# {"count":0,"terminals":[]}
 
-curl -X POST http://localhost:8083/orders -H "Content-Type: application/json" -d "{\"customerId\":\"cust-1\",\"amount\":42.50}"
-# 201 {"customerId":"cust-1","amount":42.50,"id":1}
+# A terminal connects with a store and device id — reject cases are
+# refused before the WebSocket upgrade completes:
+#   ws://localhost:8087/ws?deviceId=pos-01&storeId=store-01&type=POS
+
+# Once a terminal is connected, an order placed at its store stays
+# PLACED and is pushed to it; with none connected, Order rejects it
+# within about half a second (the Device Server tells it nobody's there).
 ```
 
-See the port table above for defaults and the env vars that override them.
-On startup, the Order Summary Batch job runs once immediately (against the
-in-memory fake order data) and logs its report.
+On startup, the Order Summary Batch job runs once against the legacy
+in-memory order data and logs its report — unrelated to the real order
+flow, which lives in the Spring Order service.
 
 ### Bringing up real infra (Postgres/Redis/Kafka/Prometheus/Grafana)
 
-```
+```bash
 docker compose up -d
 ```
 
-Then, in `Bootstrap.java`, swap the `InMemoryXxxRepository`/
-`InMemoryCacheClient`/`InMemoryEventPublisher` constructions for the
-`MyBatis*`/`RedissonCacheClient`/`KafkaEventPublisher` ones, and run
-`FlywayMigrator.migrate(...)` once against the Postgres datasource. This
-hasn't been done/tested here — no local database in this dev environment,
-by choice (see `docs/adr/0005`, `docs/adr/0007`).
+`REDIS_URL` (e.g. `redis://localhost:6379`) enables the live Order-event
+subscription — without it the server still runs, terminals still connect,
+they simply aren't pushed anything automatically. `POSTGRES_JDBC_URL` only
+affects the legacy `domain/order` module described above.
 
 ## Structure
 
@@ -135,14 +176,25 @@ core/                         the kernel, as a git submodule — Netty listener
                               shared MyBatis/Flyway/Micrometer/OTel wiring
 src/main/java/com/sunmoon/platform/
   Bootstrap.java              composition root — manual wiring, no DI container
-  PlatformConfig.java         this runtime's two ports and its worker-pool size
-  api/                        the REST endpoints this runtime serves
-  transport/ws/, transport/socket/   WebSocket and raw Socket transports
-  batch/                      Job/Step/Chunk engine + Quartz scheduling
-  domain/order/               records + ports
-  infrastructure/persistence/ MyBatis+Postgres (real, unverified) / in-memory (fake, tested)
-  infrastructure/cache/       Redisson (real, unverified) / in-memory (fake, tested)
-  infrastructure/messaging/   Kafka (real, unverified) / in-memory (fake, tested)
+  PlatformConfig.java         ports, worker-pool size, Order service URL, Redis URL, terminal grace
+  api/
+    TerminalEndpoints.java     GET /terminals, POST /terminals/push|broadcast
+    OrderProxyEndpoints.java    GET/POST /orders(/status) — forwards to Spring Order
+    CreateOrderEndpoint.java    legacy — see Known Gaps in docs/DESIGN.md
+  domain/
+    terminal/                  TerminalId, TerminalGroup, TerminalType, TerminalRegistry,
+                                DeviceDirectory (+ AcceptKnownFormatDirectory)
+    order/                     legacy — predates the Device Server role
+  transport/
+    ws/                        DeviceServerInitializer (composes the kernel's HTTP pipeline
+                                with terminal handling), TerminalHandshakeHandler
+                                (identifies before upgrade), TerminalFrameHandler
+    socket/                    raw TCP transport
+  infrastructure/
+    order/OrderClient.java      talks to the Spring Order service over HTTP
+    messaging/OrderEventSubscriber.java   subscribes to Order's Redis channel
+    persistence/, cache/        legacy adapters behind the domain/order module
+  batch/                       Job/Step/Chunk engine + Quartz scheduling
 ```
 
 Everything the kernel owns lives in `core/` and is imported from
@@ -150,5 +202,7 @@ Everything the kernel owns lives in `core/` and is imported from
 no package is split between this repository and the submodule, so an import
 tells you which side of the boundary a class is on.
 
-Grows one package at a time as each piece is actually built — see
-`docs/adr/` for the reasoning behind each addition as it happens.
+See `docs/DESIGN.md` §12 for what's built but not yet wired (device
+authentication, one-order-terminal-per-store) and what's dead weight
+worth removing (the legacy order module) — see `docs/adr/` for the
+reasoning behind each addition as it happens.
