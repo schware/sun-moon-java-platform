@@ -88,8 +88,8 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         if (deviceId != null) {
-            registry.unregister(deviceId, ctx.channel());
-            log.info("terminal disconnected: {} — {} still connected", deviceId, registry.size());
+            registry.unregister(deviceId, storeId, ctx.channel());
+            log.info("terminal disconnected: {}/{} — {} still connected", storeId, deviceId, registry.size());
         }
         super.channelInactive(ctx);
     }

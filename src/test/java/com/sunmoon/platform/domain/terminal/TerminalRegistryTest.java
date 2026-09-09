@@ -44,7 +44,7 @@ class TerminalRegistryTest {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
         registry.register("pos-01", STORE, TerminalType.POS, channel);
-        registry.unregister("pos-01", channel);
+        registry.unregister("pos-01", STORE, channel);
 
         assertEquals(0, registry.size());
         assertTrue(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, GRACE),
@@ -57,7 +57,7 @@ class TerminalRegistryTest {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
         registry.register("pos-01", STORE, TerminalType.POS, channel);
-        registry.unregister("pos-01", channel);
+        registry.unregister("pos-01", STORE, channel);
 
         assertFalse(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, Duration.ZERO),
                 "with no grace at all, a disconnected terminal is absent");
@@ -88,6 +88,26 @@ class TerminalRegistryTest {
     }
 
     /**
+     * The other half of what stores fix: two branches each have a
+     * {@code pos-01}, and they are different terminals. Keyed on the
+     * device id alone they displaced each other in a loop.
+     */
+    @Test
+    void theSameDeviceIdInTwoStoresIsTwoTerminals() {
+        TerminalRegistry registry = new TerminalRegistry();
+        EmbeddedChannel atOne = new EmbeddedChannel();
+        EmbeddedChannel atTwo = new EmbeddedChannel();
+
+        assertTrue(registry.register("pos-01", STORE, TerminalType.POS, atOne).isEmpty());
+        assertTrue(registry.register("pos-01", OTHER_STORE, TerminalType.POS, atTwo).isEmpty(),
+                "a pos-01 in another store must not displace this one");
+
+        assertEquals(2, registry.size());
+        assertEquals(atOne, registry.channelFor(STORE, "pos-01").orElseThrow());
+        assertEquals(atTwo, registry.channelFor(OTHER_STORE, "pos-01").orElseThrow());
+    }
+
+    /**
      * A device reconnecting hands back the channel it displaced, so the
      * caller can close it — two connections claiming one device id would
      * mean an order accepted on one screen and invisible on the other.
@@ -115,9 +135,9 @@ class TerminalRegistryTest {
         registry.register("pos-01", STORE, TerminalType.POS, first);
         registry.register("pos-01", STORE, TerminalType.POS, second);
 
-        registry.unregister("pos-01", first);
+        registry.unregister("pos-01", STORE, first);
 
         assertEquals(1, registry.size());
-        assertEquals(second, registry.channelFor("pos-01").orElseThrow());
+        assertEquals(second, registry.channelFor(STORE, "pos-01").orElseThrow());
     }
 }

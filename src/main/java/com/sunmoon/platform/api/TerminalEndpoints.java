@@ -49,26 +49,34 @@ public final class TerminalEndpoints {
         };
     }
 
-    /** {@code POST /terminals/push?deviceId=pos-01} — body is sent verbatim to that terminal. */
+    /**
+     * {@code POST /terminals/push?storeId=store-01&deviceId=pos-01} — body
+     * is sent verbatim to that terminal.
+     *
+     * <p>Both keys, because a device id alone does not name a terminal:
+     * every store has a {@code pos-01}.
+     */
     public RestEndpoint pushToDevice() {
         return request -> {
+            String storeId = param(request.uri(), "storeId");
             String deviceId = param(request.uri(), "deviceId");
-            if (deviceId == null) {
-                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "deviceId is required"));
+            if (storeId == null || deviceId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "storeId and deviceId are required"));
             }
             String payload = request.content().toString(StandardCharsets.UTF_8);
 
-            return registry.channelFor(deviceId)
+            return registry.channelFor(storeId, deviceId)
                     .map(channel -> {
                         channel.writeAndFlush(new TextWebSocketFrame(payload));
                         log.debug("pushed {} bytes to {}", payload.length(), deviceId);
-                        return JsonResponses.of(HttpResponseStatus.OK, Map.of("delivered", true, "deviceId", deviceId));
+                        return JsonResponses.of(HttpResponseStatus.OK, Map.of("delivered", true, "storeId", storeId, "deviceId", deviceId));
                     })
                     // Not an error: a terminal being offline is an ordinary
                     // state, and the caller needs to tell it apart from a
                     // delivery, so it is 404 with an explicit flag.
                     .orElseGet(() -> JsonResponses.of(HttpResponseStatus.NOT_FOUND,
-                            Map.of("delivered", false, "error", "terminal not connected: " + deviceId)));
+                            Map.of("delivered", false, "error", "terminal not connected: " + storeId + "/" + deviceId)));
         };
     }
 

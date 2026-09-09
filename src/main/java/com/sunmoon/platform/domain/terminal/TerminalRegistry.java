@@ -23,15 +23,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>Everything here is touched from many event-loop threads at once, so
  * the maps are concurrent and the channel groups are Netty's own.
  *
- * <p>A device connecting twice replaces its earlier session and the older
- * channel is closed. Two connections claiming one device id is not a case
- * to support: it would mean an order accepted on one screen and invisible
- * on the other.
+ * <p>Terminals are identified by {@link TerminalId} — a device id
+ * <em>within a store</em>, because every branch has a {@code pos-01}. One
+ * terminal connecting twice replaces its earlier session and the older
+ * channel is closed; two connections claiming one terminal would mean an
+ * order accepted on one screen and invisible on the other.
  */
 public final class TerminalRegistry {
 
-    private final Map<String, TerminalSession> sessionsByDevice = new ConcurrentHashMap<>();
-    private final Map<String, Channel> channelsByDevice = new ConcurrentHashMap<>();
+    private final Map<TerminalId, TerminalSession> sessionsByTerminal = new ConcurrentHashMap<>();
+    private final Map<TerminalId, Channel> channelsByTerminal = new ConcurrentHashMap<>();
     private final Map<TerminalGroup, ChannelGroup> channelsByGroup = new ConcurrentHashMap<>();
 
     /**
@@ -52,13 +53,15 @@ public final class TerminalRegistry {
      *         blocks an event-loop thread on I/O.
      */
     public Optional<Channel> register(String deviceId, String storeId, TerminalType type, Channel channel) {
+        TerminalId id = new TerminalId(storeId, deviceId);
         TerminalGroup group = new TerminalGroup(storeId, type);
-        sessionsByDevice.put(deviceId,
+
+        sessionsByTerminal.put(id,
                 new TerminalSession(deviceId, storeId, type, channel.id().asShortText(), Instant.now()));
         groupFor(group).add(channel);
         lastSeenByGroup.put(group, Instant.now());
 
-        Channel displaced = channelsByDevice.put(deviceId, channel);
+        Channel displaced = channelsByTerminal.put(id, channel);
         return Optional.ofNullable(displaced == channel ? null : displaced);
     }
 
@@ -71,8 +74,9 @@ public final class TerminalRegistry {
      * late close would evict the reconnect that replaced it, leaving a
      * live terminal the registry believes is gone.
      */
-    public void unregister(String deviceId, Channel channel) {
-        Channel current = channelsByDevice.get(deviceId);
+    public void unregister(String deviceId, String storeId, Channel channel) {
+        TerminalId id = new TerminalId(storeId, deviceId);
+        Channel current = channelsByTerminal.get(id);
         if (current != null && current != channel) {
             // Already replaced by a reconnect; this is the old channel
             // catching up, and it has nothing left to remove.
@@ -80,8 +84,8 @@ public final class TerminalRegistry {
             return;
         }
 
-        TerminalSession leaving = sessionsByDevice.remove(deviceId);
-        channelsByDevice.remove(deviceId, channel);
+        TerminalSession leaving = sessionsByTerminal.remove(id);
+        channelsByTerminal.remove(id, channel);
         // Explicitly, rather than waiting for the ChannelGroup to notice
         // the close: presence is read the moment an order arrives, and
         // "still listed because the socket has not finished closing" is
@@ -97,13 +101,14 @@ public final class TerminalRegistry {
     }
 
     public List<TerminalSession> connected() {
-        return sessionsByDevice.values().stream()
+        return sessionsByTerminal.values().stream()
                 .sorted((a, b) -> a.deviceId().compareTo(b.deviceId()))
                 .toList();
     }
 
-    public Optional<Channel> channelFor(String deviceId) {
-        return Optional.ofNullable(channelsByDevice.get(deviceId));
+    /** A device id alone does not name a terminal — every store has a {@code pos-01}. */
+    public Optional<Channel> channelFor(String storeId, String deviceId) {
+        return Optional.ofNullable(channelsByTerminal.get(new TerminalId(storeId, deviceId)));
     }
 
     /** Every connected terminal of one kind in one store — how "tell that shop's kitchen" is expressed. */
@@ -112,7 +117,7 @@ public final class TerminalRegistry {
     }
 
     public int size() {
-        return sessionsByDevice.size();
+        return sessionsByTerminal.size();
     }
 
     /**
