@@ -123,7 +123,17 @@ class DeviceServerTest {
     void anUnknownTerminalTypeIsRefusedToo() {
         assertThrows(ExecutionException.class,
                 () -> HttpClient.newHttpClient().newWebSocketBuilder()
-                        .buildAsync(URI.create("ws://localhost:" + HTTP_PORT + "/ws?deviceId=pos-02&type=FRIDGE"),
+                        .buildAsync(URI.create("ws://localhost:" + HTTP_PORT + "/ws?deviceId=pos-02&storeId=store-01&type=FRIDGE"),
+                                new Frames())
+                        .get(5, TimeUnit.SECONDS));
+    }
+
+    /** A terminal that did not say which shop it is in cannot be routed to. */
+    @Test
+    void aConnectionWithoutAStoreIsRefused() {
+        assertThrows(ExecutionException.class,
+                () -> HttpClient.newHttpClient().newWebSocketBuilder()
+                        .buildAsync(URI.create("ws://localhost:" + HTTP_PORT + "/ws?deviceId=pos-09&type=POS"),
                                 new Frames())
                         .get(5, TimeUnit.SECONDS));
     }
@@ -173,7 +183,7 @@ class DeviceServerTest {
 
     private static WebSocket connect(String deviceId, String type, Frames frames) throws Exception {
         return HttpClient.newHttpClient().newWebSocketBuilder()
-                .buildAsync(URI.create("ws://localhost:" + HTTP_PORT + "/ws?deviceId=" + deviceId + "&type=" + type),
+                .buildAsync(URI.create("ws://localhost:" + HTTP_PORT + "/ws?deviceId=" + deviceId + "&storeId=store-01&type=" + type),
                         frames)
                 .get(5, TimeUnit.SECONDS);
     }

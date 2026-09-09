@@ -72,20 +72,30 @@ public final class TerminalEndpoints {
         };
     }
 
-    /** {@code POST /terminals/broadcast?type=KDS} — how "tell every kitchen screen" is expressed. */
+    /**
+     * {@code POST /terminals/broadcast?storeId=store-01&type=KDS} — how
+     * "tell that shop's kitchen screens" is expressed.
+     *
+     * <p>The store is required. A broadcast to every branch of a kind is
+     * not a thing this platform should make easy to type by accident.
+     */
     public RestEndpoint broadcastToType() {
         return request -> {
-            String rawType = param(request.uri(), "type");
-            TerminalType type = parseType(rawType);
+            String storeId = param(request.uri(), "storeId");
+            TerminalType type = parseType(param(request.uri(), "type"));
+            if (storeId == null || storeId.isBlank()) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "storeId is required"));
+            }
             if (type == null) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
                         Map.of("error", "type must be one of POS, KDS, DID"));
             }
             String payload = request.content().toString(StandardCharsets.UTF_8);
-            int reached = registry.channelsOf(type).size();
-            registry.channelsOf(type).writeAndFlush(new TextWebSocketFrame(payload));
+            int reached = registry.channelsOf(storeId, type).size();
+            registry.channelsOf(storeId, type).writeAndFlush(new TextWebSocketFrame(payload));
 
-            return JsonResponses.of(HttpResponseStatus.OK, Map.of("type", type.name(), "delivered", reached));
+            return JsonResponses.of(HttpResponseStatus.OK,
+                    Map.of("storeId", storeId, "type", type.name(), "delivered", reached));
         };
     }
 

@@ -25,6 +25,7 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
     private final TerminalRegistry registry;
 
     private String deviceId;
+    private String storeId;
     private TerminalType type;
 
     public TerminalFrameHandler(TerminalRegistry registry) {
@@ -35,9 +36,10 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
     public void userEventTriggered(ChannelHandlerContext ctx, Object event) throws Exception {
         if (event instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
             deviceId = ctx.channel().attr(TerminalHandshakeHandler.DEVICE_ID).get();
+            storeId = ctx.channel().attr(TerminalHandshakeHandler.STORE_ID).get();
             type = ctx.channel().attr(TerminalHandshakeHandler.TERMINAL_TYPE).get();
 
-            registry.register(deviceId, type, ctx.channel())
+            registry.register(deviceId, storeId, type, ctx.channel())
                     // A device reconnecting displaces its old channel. Closing
                     // it here, off the registry, keeps that map free of I/O.
                     .ifPresent(displaced -> {
@@ -45,9 +47,12 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
                         displaced.close();
                     });
 
-            log.info("terminal connected: {} ({}) — {} now connected", deviceId, type, registry.size());
+            log.info("terminal connected: {} ({} at {}) — {} now connected",
+                    deviceId, type, storeId, registry.size());
             ctx.writeAndFlush(new TextWebSocketFrame(
-                    "{\"type\":\"WELCOME\",\"deviceId\":\"" + deviceId + "\",\"terminal\":\"" + type + "\"}"));
+                    "{\"type\":\"WELCOME\",\"deviceId\":\"" + deviceId
+                            + "\",\"storeId\":\"" + storeId
+                            + "\",\"terminal\":\"" + type + "\"}"));
             return;
         }
         super.userEventTriggered(ctx, event);

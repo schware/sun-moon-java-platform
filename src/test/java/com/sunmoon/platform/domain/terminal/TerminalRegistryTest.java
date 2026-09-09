@@ -17,13 +17,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TerminalRegistryTest {
 
     private static final Duration GRACE = Duration.ofMinutes(3);
+    private static final String STORE = "store-01";
+    private static final String OTHER_STORE = "store-02";
 
     @Test
     void aConnectedTerminalIsPresent() {
         TerminalRegistry registry = new TerminalRegistry();
-        registry.register("pos-01", TerminalType.POS, new EmbeddedChannel());
+        registry.register("pos-01", STORE, TerminalType.POS, new EmbeddedChannel());
 
-        assertTrue(registry.isPresentOrRecentlySeen(TerminalType.POS, GRACE));
+        assertTrue(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, GRACE));
         assertEquals(1, registry.size());
     }
 
@@ -32,8 +34,8 @@ class TerminalRegistryTest {
     void aKindNeverSeenIsAbsentImmediately() {
         TerminalRegistry registry = new TerminalRegistry();
 
-        assertFalse(registry.isPresentOrRecentlySeen(TerminalType.KDS, GRACE));
-        assertTrue(registry.lastSeen(TerminalType.KDS).isEmpty());
+        assertFalse(registry.isPresentOrRecentlySeen(STORE, TerminalType.KDS, GRACE));
+        assertTrue(registry.lastSeen(STORE, TerminalType.KDS).isEmpty());
     }
 
     /** The case the grace period exists for: a screen that just dropped is still counted. */
@@ -41,11 +43,11 @@ class TerminalRegistryTest {
     void aTerminalThatJustDisconnectedIsStillCountedWithinTheGracePeriod() {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
-        registry.register("pos-01", TerminalType.POS, channel);
+        registry.register("pos-01", STORE, TerminalType.POS, channel);
         registry.unregister("pos-01", channel);
 
         assertEquals(0, registry.size());
-        assertTrue(registry.isPresentOrRecentlySeen(TerminalType.POS, GRACE),
+        assertTrue(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, GRACE),
                 "a terminal seen a moment ago should still count as present");
     }
 
@@ -54,10 +56,10 @@ class TerminalRegistryTest {
     void aTerminalGoneLongerThanTheGracePeriodIsAbsent() {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
-        registry.register("pos-01", TerminalType.POS, channel);
+        registry.register("pos-01", STORE, TerminalType.POS, channel);
         registry.unregister("pos-01", channel);
 
-        assertFalse(registry.isPresentOrRecentlySeen(TerminalType.POS, Duration.ZERO),
+        assertFalse(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, Duration.ZERO),
                 "with no grace at all, a disconnected terminal is absent");
     }
 
@@ -65,10 +67,24 @@ class TerminalRegistryTest {
     @Test
     void oneKindOfTerminalDoesNotVouchForAnother() {
         TerminalRegistry registry = new TerminalRegistry();
-        registry.register("kds-01", TerminalType.KDS, new EmbeddedChannel());
+        registry.register("kds-01", STORE, TerminalType.KDS, new EmbeddedChannel());
 
-        assertTrue(registry.isPresentOrRecentlySeen(TerminalType.KDS, GRACE));
-        assertFalse(registry.isPresentOrRecentlySeen(TerminalType.POS, GRACE));
+        assertTrue(registry.isPresentOrRecentlySeen(STORE, TerminalType.KDS, GRACE));
+        assertFalse(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, GRACE));
+    }
+
+    /**
+     * The bug stores exist to prevent: one branch's screen must not make
+     * another branch look staffed.
+     */
+    @Test
+    void oneStoresTerminalDoesNotVouchForAnother() {
+        TerminalRegistry registry = new TerminalRegistry();
+        registry.register("pos-01", STORE, TerminalType.POS, new EmbeddedChannel());
+
+        assertTrue(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, GRACE));
+        assertFalse(registry.isPresentOrRecentlySeen(OTHER_STORE, TerminalType.POS, GRACE),
+                "a POS at one store must not make another store look staffed");
     }
 
     /**
@@ -82,8 +98,8 @@ class TerminalRegistryTest {
         EmbeddedChannel first = new EmbeddedChannel();
         EmbeddedChannel second = new EmbeddedChannel();
 
-        assertTrue(registry.register("pos-01", TerminalType.POS, first).isEmpty());
-        assertEquals(first, registry.register("pos-01", TerminalType.POS, second).orElseThrow());
+        assertTrue(registry.register("pos-01", STORE, TerminalType.POS, first).isEmpty());
+        assertEquals(first, registry.register("pos-01", STORE, TerminalType.POS, second).orElseThrow());
         assertEquals(1, registry.size());
     }
 
@@ -96,8 +112,8 @@ class TerminalRegistryTest {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel first = new EmbeddedChannel();
         EmbeddedChannel second = new EmbeddedChannel();
-        registry.register("pos-01", TerminalType.POS, first);
-        registry.register("pos-01", TerminalType.POS, second);
+        registry.register("pos-01", STORE, TerminalType.POS, first);
+        registry.register("pos-01", STORE, TerminalType.POS, second);
 
         registry.unregister("pos-01", first);
 

@@ -73,7 +73,15 @@ public final class OrderEventSubscriber {
             }
 
             long orderId = event.path("orderId").asLong();
-            int reached = registry.channelsOf(audience).size();
+            String storeId = event.path("storeId").asText(null);
+            if (storeId == null || storeId.isBlank()) {
+                // Nothing to route on. Dropping it is right: pushing to
+                // every shop would show one store another's orders.
+                log.warn("order {} has no storeId; not routed", orderId);
+                return;
+            }
+
+            int reached = registry.channelsOf(storeId, audience).size();
 
             // A placed order with nowhere to go is refused rather than left
             // waiting for a timeout: the customer finds out now, and the
@@ -87,17 +95,18 @@ public final class OrderEventSubscriber {
             // because it fetches the list rather than replaying frames. A
             // dropped wifi should cost a delay, not a customer.
             if (reached == 0 && "PLACED".equals(status)) {
-                if (registry.isPresentOrRecentlySeen(audience, terminalGrace)) {
-                    log.info("order {} left PLACED: no {} terminal connected, but one was seen within {}",
-                            orderId, audience, terminalGrace);
+                if (registry.isPresentOrRecentlySeen(storeId, audience, terminalGrace)) {
+                    log.info("order {} left PLACED: no {} terminal at {}, but one was seen within {}",
+                            orderId, audience, storeId, terminalGrace);
                     return;
                 }
                 rejectUnattended(orderId);
                 return;
             }
 
-            registry.channelsOf(audience).writeAndFlush(new TextWebSocketFrame(json));
-            log.info("order {} -> {}: pushed to {} {} terminal(s)", orderId, status, reached, audience);
+            registry.channelsOf(storeId, audience).writeAndFlush(new TextWebSocketFrame(json));
+            log.info("order {} -> {}: pushed to {} {} terminal(s) at {}",
+                    orderId, status, reached, audience, storeId);
         } catch (Exception e) {
             // A malformed event must not kill the subscription — the next
             // one still has to arrive.
@@ -113,7 +122,7 @@ public final class OrderEventSubscriber {
     private void rejectUnattended(long orderId) {
         try {
             var response = orders.changeStatus(orderId, "REJECTED", null);
-            log.info("order {} rejected: no POS terminal connected (Order answered {})",
+            log.info("order {} rejected: no POS terminal at that store (Order answered {})",
                     orderId, response.statusCode());
         } catch (Exception e) {
             // Leaving it PLACED is survivable — the acceptance timeout in

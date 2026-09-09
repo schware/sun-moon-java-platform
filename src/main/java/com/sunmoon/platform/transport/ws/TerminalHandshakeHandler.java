@@ -22,10 +22,15 @@ import java.util.Locale;
 /**
  * Identifies a terminal <em>before</em> the WebSocket upgrade completes.
  *
- * <p>A terminal connects to {@code /ws?deviceId=pos-01&type=POS}. This
- * handler reads those, checks them, and either stamps them on the channel
- * for {@link TerminalFrameHandler} to pick up, or answers the HTTP
- * handshake with 400 and closes.
+ * <p>A terminal connects to
+ * {@code /ws?deviceId=pos-01&storeId=store-01&type=POS}. This handler
+ * reads those, checks them, and either stamps them on the channel for
+ * {@link TerminalFrameHandler} to pick up, or answers the HTTP handshake
+ * with 400 and closes.
+ *
+ * <p>{@code storeId} is required rather than optional. A terminal that
+ * did not say which shop it is in cannot be routed to, and defaulting it
+ * would mean guessing which counter an order belongs to.
  *
  * <p>Rejecting at handshake rather than after upgrade is deliberate: a
  * client that got it wrong gets a status code it can read, instead of an
@@ -34,6 +39,7 @@ import java.util.Locale;
 public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter {
 
     public static final AttributeKey<String> DEVICE_ID = AttributeKey.valueOf("deviceId");
+    public static final AttributeKey<String> STORE_ID = AttributeKey.valueOf("storeId");
     public static final AttributeKey<TerminalType> TERMINAL_TYPE = AttributeKey.valueOf("terminalType");
 
     private static final String WEBSOCKET_PATH = "/ws";
@@ -58,10 +64,15 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
         }
 
         String deviceId = first(query, "deviceId");
+        String storeId = first(query, "storeId");
         String rawType = first(query, "type");
 
         if (!directory.isRegistered(deviceId)) {
             reject(ctx, request, "deviceId is missing or not a valid device id");
+            return;
+        }
+        if (storeId == null || storeId.isBlank()) {
+            reject(ctx, request, "storeId is required");
             return;
         }
 
@@ -72,6 +83,7 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
         }
 
         ctx.channel().attr(DEVICE_ID).set(deviceId);
+        ctx.channel().attr(STORE_ID).set(storeId);
         ctx.channel().attr(TERMINAL_TYPE).set(type);
         ctx.fireChannelRead(message);
     }
