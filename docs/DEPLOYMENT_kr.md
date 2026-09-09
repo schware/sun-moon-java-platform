@@ -2,12 +2,15 @@
 
 # 배포 절차 — Debian 서버
 
-> ⚠️ **2026-09-09 기준 보류.** 아래의 포트 배정(BO 8084)은 잘못됐습니다.
-> 서버에는 번호 규칙이 있고 — **BO 8080, API 서비스 8081~8089, Socket
-> 9090** — 컨테이너 하나가 그중 세 칸을 물는 구조는 그 규칙과 맞지
-> 않습니다. 컨테이너는 서버에서 제거했고, 이미지와 clone은 남아 있습니다.
-> 나머지 내용(Dockerfile, env 파일, DB 단계, 검증 절차)은 포트와 BO 분리가
-> 정해지면 그대로 유효합니다. ADR-0013 참고.
+> ⚠️ **2026-09-09 기준 일부 대체됨.** 이 절차서는 BO와 이 runtime이 한
+> 컨테이너였을 때 쓴 것입니다. 지금은 두 service입니다(ADR-0014) —
+> **BO는
+> [sun-moon-platform-bo](https://github.com/schware/sun-moon-platform-bo)에서
+> 8080, LAN 전용으로 배포**하고, 이 runtime은 API와 Socket listener를
+> 가집니다. 아래 모든 단계(clone, 빌드, env 파일, DB, 검증)는 각
+> service에 대해 그대로 유효하며, 달라지는 것은 둘뿐입니다 —
+> `--recurse-submodules`로 clone할 것, 그리고 service마다 database를 따로
+> 둘 것. 여기 남은 BO 관련 명령은 기록으로만 둡니다.
 
 배포 대상과 근거: [`adr/0012`](adr/0012-deploy-to-own-debian-server.md).
 이미 그 서버에서 쓰고 있는 관례(`Debian-Setting` 저장소 `docs/docker.md`)를

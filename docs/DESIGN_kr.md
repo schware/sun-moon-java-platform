@@ -19,8 +19,8 @@
 ## 1. 이것이 무엇인가
 
 Java **Enterprise Runtime Platform**: 하나의 JVM 프로세스가 REST API,
-Back Office(BO) 관리 API, WebSocket transport, raw TCP Socket transport,
-Batch 엔진을 함께 호스팅한다. DDD 구조, Netty 기반, 동시 접속자
+WebSocket transport, raw TCP Socket transport, Batch 엔진을 함께
+호스팅한다. DDD 구조, Netty 기반, 동시 접속자
 1,000~10,000명 목표, 그리고 **Spring을 전혀 쓰지 않는다**
 (ADR-0002, `Alignment`의 ADR-0010).
 
@@ -54,13 +54,11 @@ Python, C, Java로 증명한다.
 ```
                        ┌──────────────────────── JVM 하나 ────────────────────────┐
                        │                                                          │
-  BO Frontend  ──8080──┼─▶ HTTP listener "BO"        ─┐                           │
-  (추후 SPA)           │     /health /metrics /bo/*   │                           │
-                       │                              │                           │
-  API client   ──8083──┼─▶ HTTP listener "Order API" ─┼─▶ 공유 boss + worker      │
-  WS client            │     /health /orders /ws      │   event-loop group        │
-                       │                              │                           │
-  장비         ──9090──┼─▶ Socket listener           ─┘                           │
+  API client   ──8083──┼─▶ HTTP listener "API"       ─┐                           │
+  WS client            │     /health /metrics         │                           │
+                       │     /orders /ws              ├─▶ 공유 boss + worker      │
+                       │                              │   event-loop group        │
+  장비         ──9011──┼─▶ Socket listener           ─┘                           │
                        │                                                          │
                        │   Quartz scheduler ─▶ Batch 엔진 (자체 thread pool)      │
                        └──────────────────────────────────────────────────────────┘
@@ -68,18 +66,13 @@ Python, C, Java로 증명한다.
 
 | Port | Listener | 서비스하는 것 | WebSocket | 환경변수 |
 |---|---|---|---|---|
-| 8080 | BO | `/health`, `/metrics`, `/bo/*` | 없음 | `BO_PORT` |
-| 8083 | Order API | `/health`, `/orders`, `/ws` | 있음 | `API_PORT` |
-| 9090 | Socket | raw TCP (echo) | — | `SOCKET_PORT` |
+| 8083 | API | `/health`, `/metrics`, `/orders`, `/ws` | 있음 | `API_PORT` |
+| 9011 | Socket | raw TCP (echo) | — | `SOCKET_PORT` |
 
-`/health`를 두 HTTP listener 모두에 둔 건 의도적이다 — 각각 독립적으로
-probe할 수 있어야 한다. `/metrics`가 BO 쪽에 있는 건 BO가 운영 표면이기
-때문이다.
-
-위 port는 **코드 기본값**이다. 배포 대상에서 어떤 번호를 쓸지는 별개
-문제다 — 서버에는 자체 번호 규칙(BO 8080, API 서비스 8081~8089, Socket
-9090)이 있고, 컨테이너 하나가 그중 셋을 동시에 물는 지금 구조는 그
-규칙과 맞지 않는다. 이 지점에서 배포는 보류 상태다. ADR-0013 참고.
+계열 전체 port 체계(ADR-0013)에서 이 runtime의 자리다 — REST API는
+8081~8089 대역, Socket은 언어별로 90x1. 8083은 기존 Spring Order service가
+넘겨줄 자리이고, 이 runtime에 자기 업무가 생기기 전까지는 점유가 아니라
+예약으로 둔다.
 
 **Threading.** Event-loop thread는 codec과 router만 실행한다.
 `RestEndpoint.handle()`은 **제한된 크기의 worker pool**
@@ -96,26 +89,28 @@ loop 바깥으로 분리돼 돌아간다.
 Hexagonal 구조를 `com.sunmoon.platform` 아래 package로 표현했다:
 
 ```
-transport/          inbound adapter — Netty pipeline, routing, endpoint
-  http/             REST: router, listener spec, 공용 response/validation helper
-  http/bo/          BO 인증 + 권한 decorator
-  http/bo/commoncode/, http/bo/device/   BO 화면
+core/               kernel, git submodule (com.sunmoon.platform.core,
+                      .transport.http, .observability, .infrastructure.persistence)
+                      — listener 바인딩, REST routing, event loop 밖 실행,
+                      공용 MyBatis/Flyway/Micrometer/OTel 결선
+api/                inbound adapter — 이 runtime이 제공하는 REST endpoint
+transport/
   ws/, socket/      WebSocket, raw TCP handler
-domain/             모델 + 그것이 소유한 port (interface만, framework 타입 없음)
-  order/ operator/ commoncode/ device/
+domain/order/       모델 + 그것이 소유한 port (interface만, framework 타입 없음)
 infrastructure/     domain port를 구현하는 outbound adapter
   persistence/      MyBatis+Postgres(실제) / in-memory(fake)
-  auth/             session store, BCrypt 해싱
   cache/            Redisson(실제) / in-memory(fake)
   messaging/        Kafka(실제) / in-memory(fake)
 batch/              Job/Step/Chunk 엔진 + Quartz 스케줄링
-observability/      Micrometer registry, OpenTelemetry tracer
-core/               CoreRuntime(listener 바인딩), RuntimeConfig
 Bootstrap.java      composition root — 구현체를 고르는 유일한 장소
+PlatformConfig.java port 두 개와 worker pool 크기
 ```
 
-**의존 규칙.** `domain`은 JDK 외에 아무것도 의존하지 않는다. `transport`와
-`infrastructure`는 둘 다 `domain`을 의존하되 서로는 의존하지 않는다. 어떤
+**의존 규칙.** `domain`은 JDK 외에 아무것도 의존하지 않는다. `api`/
+`transport`와 `infrastructure`는 둘 다 `domain`을 의존하되 서로는 의존하지
+않는다. Kernel은 이 중 아무것도 의존하지 않는다 — 이 runtime이 조립해 쓰는
+library이고, 양쪽으로 쪼개진 package가 하나도 없어서 import만 보면 그
+클래스가 경계의 어느 쪽인지 알 수 있다(ADR-0014). 어떤
 adapter가 어떤 port를 구현하는지 아는 곳은 `Bootstrap` 하나뿐이라, 전체
 시스템을 fake에서 실제 인프라로 바꾸는 건 그 파일 하나를 고치는 일이다.
 
@@ -124,88 +119,33 @@ interface다(예: `domain.device.DeviceRepository`).
 
 ## 5. 요청 처리 흐름
 
-BO 요청 하나가 처리되는 전 과정:
+REST 요청 하나가 처리되는 전 과정:
 
 ```
 TCP → HttpServerCodec → HttpObjectAggregator → [WebSocketServerProtocolHandler]
-    → RestRequestRouter → AuthorizedEndpoint → 실제 RestEndpoint → domain port → adapter
+    → RestRequestRouter → [worker pool] → 실제 RestEndpoint → domain port → adapter
 ```
 
 - **Routing** (`RestRequestRouter`)은 `RouteKey(HttpMethod, path)`로
   매칭하며 query string은 제거한다(ADR-0008). Path variable은 없다 —
   대상 행의 key는 request body(`DELETE`)나 query string(`?group=`,
   `?type=`)으로 전달한다. 매칭 실패 시 404.
-- **Authorization** (`AuthorizedEndpoint`)은 decorator라서 endpoint 자체는
-  인증을 전혀 언급하지 않는다. session cookie를 확인한 뒤, 운영자가
-  super admin이거나 해당 `Screen`에 대한 권한이 그 `Action`을 허용하면
-  통과시킨다. 아니면 401(session 없음) 또는 403.
 - **Endpoint**는 단일 메서드 interface
   (`RestEndpoint: FullHttpRequest → FullHttpResponse`)를 구현하며, body를
   파싱·검증하고 domain port를 호출한 뒤 `JsonResponses`로 JSON을 반환한다.
 
-## 6. Back Office
+## 6. Back Office — 이전됨
 
-### 6.1 인증 — JWT가 아니라 서버 측 session
+Back Office는 이제
+[**sun-moon-platform-bo**](https://github.com/schware/sun-moon-platform-bo)에
+있고 설계서도 그쪽에 있다. Port 체계가 service당 container 하나를 전제하게
+되고, 내부 전용인 BO가 장비를 마주하는 API 옆자리에 더는 맞지 않게 되면서
+분리했다(ADR-0014).
 
-로그인하면 서버가 보관하는 불투명한 session id를 발급하고, `/bo` 경로로
-한정된 `HttpOnly` + `SameSite=Lax` cookie로 내려준다. 비밀번호는 BCrypt
-해시다(cost 12, `at.favre.lib:bcrypt`).
-
-JWT 대신 session을 고른 이유는 계정이 탈취되거나 퇴사한 운영자를 레코드
-하나 지워서 **즉시** 차단할 수 있어야 하기 때문이다 — 관리자 화면에는
-그게 필요하고, 단일 프로세스인 동안에는 JWT의 stateless 이점이 실익이
-없다(ADR-0004). 권한은 매 요청마다 다시 읽지 않고 로그인 시 한 번 읽어
-session에 캐싱한다.
-
-| Endpoint | 용도 |
-|---|---|
-| `POST /bo/auth/login` | 자격 검증, session 생성, cookie 설정 |
-| `POST /bo/auth/logout` | 서버 측 session 삭제, cookie 만료 |
-| `GET /bo/auth/me` | 현재 운영자 + 접근 가능 화면 (Frontend 메뉴 구성용) |
-
-**최초 운영자 문제.** BO에서 운영자를 관리하려면 로그인이 필요하므로,
-`Bootstrap`이 `BO_ADMIN_USERNAME` / `BO_ADMIN_PASSWORD`로 super admin을
-하나 seed한다 — 단, 운영자가 하나도 없을 때만, 그리고 추측 가능한
-기본값은 절대 쓰지 않는다. 환경변수가 없으면 경고만 남기고 아무것도
-만들지 않는다.
-
-### 6.2 권한 모델 — 3단계
-
-1. **전체관리자**(`Operator.superAdmin`) — 모든 검사를 건너뛴다.
-2. **화면별** — `Screen`은 테이블이 아니라 코드로 정의된 enum
-   (`COMMON_CODE`, `DEVICE`, `OPERATOR`)이다. 화면 목록은 운영자의
-   행위가 아니라 배포로 바뀌기 때문이다.
-3. **화면 안의 액션별** — `OperatorScreenPermission`의 독립적인 boolean
-   네 개: `canView` / `canCreate` / `canSave` / `canDelete`
-   (조회 / 신규 / 저장 / 삭제).
-
-HTTP 메서드 하나가 액션 하나에 정확히 대응하며, CRUD에 메서드 인식
-라우팅이 필요한 이유가 바로 이것이다:
-
-| Method | Action | 의미 |
-|---|---|---|
-| `GET` | `VIEW` | 목록 조회(필터 가능) |
-| `POST` | `CREATE` | 추가; key가 이미 있으면 409 |
-| `PUT` | `SAVE` | 수정; key가 없으면 404 |
-| `DELETE` | `DELETE` | body의 key로 삭제 |
-
-`create`와 `save`를 upsert로 합치지 않고 별개 연산으로 둔 것은 신규와
-저장이 별개의 권한이기 때문이다.
-
-### 6.3 화면
-
-| 화면 | Endpoint | 모델 |
-|---|---|---|
-| 공통코드 | `/bo/common-code` (+`?group=`) | `CommonCode(groupCode, code, name, sortOrder, active)`, PK `(groupCode, code)` |
-| 장비 | `/bo/devices` (+`?type=`) | `Device(deviceId, name, deviceType, location, active)`, PK `deviceId` |
-
-`Device.deviceType`은 `DEVICE_TYPE` 공통코드를 참조하는 값이지만
-foreign key로 **묶지 않았다**. 공통코드는 런타임에 수정 가능하고, 참조가
-끊겼다고 장비 행 자체를 읽지 못하게 되면 곤란하다.
-
-**장비는 마스터 데이터만 다룬다.** 접속 상태, handshake, 프로토콜은 아직
-존재하지 않는 별도의 **Device Server** 몫이다(ADR-0004). BO는 살아있는
-연결을 건드리지 않는다.
+같이 간 것: operator/commoncode/device domain, session 인증과
+`AuthorizedEndpoint` 권한 decorator, 그 MyBatis adapter, migration
+V2~V4(그쪽에서 V1~V3으로 번호를 다시 매겼다). 두 service는 같은 kernel
+위에 서고, kernel은 각 저장소에 `core/` submodule로 들어온다.
 
 ## 7. Batch
 
@@ -245,20 +185,22 @@ Postgres이기 때문이다(ADR-0005).
 | Migration | 테이블 | Key |
 |---|---|---|
 | `V1` | `orders` | `id` |
-| `V2` | `operators`, `operator_screen_permissions` | `id`; `(operator_id, screen)` |
-| `V3` | `common_codes` | `(group_code, code)` |
-| `V4` | `devices` | `device_id` |
+
+BO의 migration은 BO와 함께 나갔고 그쪽에서 V1부터 번호가 다시 매겨졌다.
+그래서 두 service는 각자 database가 필요하다. 하나에 둘을 물려도 깨지지는
+않는다 — Flyway가 로컬에서 해석 못 하는 적용 이력을 보면 migration을
+거부한다.
 
 접속 정보는 `POSTGRES_JDBC_URL` / `POSTGRES_USER` / `POSTGRES_PASSWORD` /
 `POSTGRES_POOL_SIZE`에서 읽는다.
 
-**이 중 어느 것도 실제 DB에서 실행된 적이 없다.** §12의 공백 2번 참고.
+**이 중 어느 것도 실제 DB에서 실행된 적이 없다.** §12의 공백 1번 참고.
 
 ## 9. 횡단 관심사
 
 | 관심사 | 메커니즘 | 상태 |
 |---|---|---|
-| 설정 | 환경변수 (`RuntimeConfig`, `*Settings.fromEnv()`) | 동작 |
+| 설정 | 환경변수 (`PlatformConfig`, `*Settings.fromEnv()`) | 동작 |
 | 로깅 | Logback → 콘솔 | 동작 |
 | Metrics | Micrometer `PrometheusMeterRegistry`, `GET /metrics`로 스크레이프 | 동작, 검증됨 |
 | Tracing | OpenTelemetry SDK + 로깅 span exporter | 동작, 검증됨 |
@@ -271,27 +213,25 @@ Postgres이기 때문이다(ADR-0005).
 
 | 변수 | 기본값 | 용도 |
 |---|---|---|
-| `BO_PORT` | `PORT`, 없으면 `8080` | BO listener. PaaS는 `PORT`를 주입하고 공개 서비스가 그 port에 바인딩하기를 요구한다(ADR-0011) |
-| `API_PORT` | `8083` | Order API listener |
-| `SOCKET_PORT` | `9090` | raw Socket listener |
+| `API_PORT` | `PORT`, 없으면 `8083` | REST/WebSocket listener. PaaS는 `PORT`를 주입하고 공개 서비스가 그 port에 바인딩하기를 요구한다(ADR-0011) |
+| `SOCKET_PORT` | `9011` | raw Socket listener |
 | `WORKER_THREADS` | `코어 수 × 4` | REST endpoint가 실행되는 pool 크기(ADR-0010) |
-| `COOKIE_SECURE` | `false` | BO session cookie의 `Secure` 속성 — TLS 뒤에서는 반드시 `true` |
-| `BO_ADMIN_USERNAME` / `BO_ADMIN_PASSWORD` | 없음 | 최초 super admin, 운영자가 없을 때만 seed |
 | `POSTGRES_JDBC_URL` | 없음 | **전환 스위치**: 설정하면 실제 MyBatis/Postgres adapter + Flyway, 없으면 in-memory fake |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE` | `app` / `app` / `5` | DB 자격 증명과 pool 크기 |
 | `REDIS_URL` | `redis://localhost:6379` | Redisson (미사용 — `SessionStore`/`CacheClient`의 실제 adapter가 결선돼 있지 않음) |
 
 ## 11. 테스트 전략
 
-26개 테스트가 모두 통과하며, 두 가지 방식이다:
+여기 11개가 모두 통과하며, 두 가지 방식이다 — 세 저장소를 합치면 26개다
+(BO 12개, kernel 3개).
 
-- **라이브 HTTP 테스트.** `CoreRuntimeTransportsTest`, `BoAuthTest`,
-  `CommonCodeCrudTest`, `DeviceCrudTest`, `BlockingWorkOffloadTest`는 실제
+- **라이브 HTTP 테스트.** `CoreRuntimeTransportsTest`는 실제
   `CoreRuntime`을 테스트 port로 띄우고 진짜 client로 두드린다 —
-  `java.net.http.HttpClient`(WebSocket client와 cookie manager 포함),
-  그리고 raw `java.net.Socket`. mock이 없고, 실제 Netty pipeline·라우팅·
-  session cookie·권한 검사는 물론 endpoint가 정말로 event loop 바깥에서
-  실행되는지까지 그대로 확인한다.
+  `java.net.http.HttpClient`(WebSocket client 포함)와 raw
+  `java.net.Socket`. mock이 없고 실제 Netty pipeline과 라우팅을 그대로
+  지난다. Endpoint가 event loop 밖에서 도는지 증명하는
+  `BlockingWorkOffloadTest`는 이제 그 성질을 강제하는 kernel 저장소로
+  옮겼다.
 - **단위 테스트** — transport가 필요 없는 부분: Batch 엔진(직접 실행과
   실제 Quartz scheduler 경유 둘 다), in-memory adapter들.
 
@@ -303,30 +243,25 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
 
 운영에서 먼저 문제가 될 순서대로 정리했다.
 
-1. **실제 DB 검증이 없다.** 모든 MyBatis mapper, Flyway migration 4개,
+1. **실제 DB 검증이 없다.** MyBatis mapper와 Flyway migration,
    `MyBatisConfig`가 컴파일은 되지만 실제 PostgreSQL에서 실행된 적이
    없다. 다만 전환 스위치가 동작하고 **조용히 fake로 흘러가지 않는다는
    것**은 확인했다 — 패키징된 앱을 `POSTGRES_JDBC_URL`이 가리키는 DB 없이
    실행하면 HikariCP 오류로 즉시 종료한다. 첫 실전은 Debian 서버
    배포다(ADR-0012, `DEPLOYMENT.md`).
-2. **`SessionStore`에 실제 adapter가 없다.** `InMemorySessionStore`만
-   있어서 session이 프로세스와 함께 사라지고 인스턴스 간 공유도 안 된다 —
-   즉 배포된 서비스를 인스턴스 하나 이상으로 늘릴 수 없고, 배포할 때마다
-   전원 로그아웃된다. `RedisSessionStore`가 예정된 실제 adapter다.
-3. **운영자 관리 화면이 없다.** 운영자와 권한은 시작 시 seed나 repository
-   직접 호출(`InMemoryOperatorRepository.grantPermission`, 테스트 전용)로만
-   만들 수 있다. `OPERATOR` 화면 enum 값은 있지만 그 뒤에 아무것도 없다.
-4. **CORS 처리가 없다.** Frontend가 별도 origin에서 `credentials: include`로
-   BO를 호출하는 순간 필요해진다.
-5. **HTTP pipelining 시 응답 순서가 뒤바뀔 수 있다.** endpoint를 worker로
+2. **이 runtime에는 아직 업무가 없다.** `POST /orders`는 동작하는 REST
+   endpoint지만, 여기 Order domain은 형태를 증명하려고 만든 모듈이고
+   실제로 무슨 일을 할지는 미정이다. 8083을 점유가 아니라 예약으로 둔
+   이유가 이것이다.
+3. **HTTP pipelining 시 응답 순서가 뒤바뀔 수 있다.** endpoint를 worker로
    넘기면서(ADR-0010) 한 연결에서 응답을 기다리지 않고 보낸 두 요청이
    순서가 어긋난 채 끝날 수 있다. 일반적인 keep-alive client는 응답을
    기다리므로 실제로는 발생하지 않아, 고치지 않고 기록만 해둔다.
-6. **Socket과 WebSocket transport는 echo handler다.** transport가
+4. **Socket과 WebSocket transport는 echo handler다.** transport가
    동작한다는 것만 증명하며, 프로토콜은 없다.
-7. **Dockerfile을 빌드해본 적이 없다** — 이 환경에 Docker가 없다(ADR-0003).
+5. **Dockerfile을 빌드해본 적이 없다** — 이 환경에 Docker가 없다(ADR-0003).
    다만 그것이 실행하는 `installDist` 산출물이 정상 기동하는 것은 확인했다.
-8. **배포되지 않았다.** 저장소 쪽 준비는 끝났고(ADR-0011, ADR-0012,
+6. **배포되지 않았다.** 저장소 쪽 준비는 끝났고(ADR-0011, ADR-0012,
    `DEPLOYMENT.md`), 남은 단계는 대상 서버에서 `sudo`가 필요하다 —
    데이터베이스 생성과 방화벽 개방.
 
@@ -346,6 +281,8 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
 | [0010](adr/0010-run-endpoints-off-the-event-loop.md) | Endpoint를 worker pool에서 실행 |
 | [0011](adr/0011-deployment-mechanics.md) | Dockerfile, PORT, adapter 선택, Secure cookie |
 | [0012](adr/0012-deploy-to-own-debian-server.md) | Render 대신 본인 Debian 서버에 배포 |
+| [0013](adr/0013-withdraw-port-8084.md) | Port 8084 철회, 계열 전체 port 체계 |
+| [0014](adr/0014-split-the-kernel-from-the-domains-built-on-it.md) | Kernel 분리, BO는 자기 저장소로 |
 
 배포 절차는 [`DEPLOYMENT.md`](DEPLOYMENT.md)에 있다.
 

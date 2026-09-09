@@ -2,13 +2,15 @@
 
 # Deployment runbook — the Debian server
 
-> ⚠️ **Paused as of 2026-09-09.** The port assignment below (BO on 8084)
-> was wrong: the server has a port-numbering scheme — **BO 8080, API
-> services 8081-8089, Socket 9090** — and one container binding three of
-> those slots doesn't fit it. The container has been removed from the
-> server; the image and the clone remain. Everything else in this runbook
-> (Dockerfile, env file, database steps, verification) still applies once
-> the ports and the BO/runtime split are settled. See ADR-0013.
+> ⚠️ **Superseded in part, as of 2026-09-09.** This runbook was written
+> when BO and this runtime were one container. They are two services now
+> (ADR-0014): **BO deploys from
+> [sun-moon-platform-bo](https://github.com/schware/sun-moon-platform-bo)
+> on 8080, LAN-only**, and this runtime keeps the API and Socket
+> listeners. Every step below — clone, build, env file, database,
+> verification — still applies to each service separately, with two
+> changes: clone with `--recurse-submodules`, and give each service its
+> own database. The BO-specific commands here are kept only as a record.
 
 Target and rationale: [`adr/0012`](adr/0012-deploy-to-own-debian-server.md).
 Follows the conventions already in use on that server (`Debian-Setting`

@@ -4,3 +4,11 @@ build
 docs
 *.md
 run-*.log
+
+# core/ is the kernel submodule and IS part of the build context — only its
+# own build output and git pointer are excluded.
+core/.git
+core/.gradle
+core/build
+core/docs
+core/*.md

@@ -1,8 +1,9 @@
-package com.sunmoon.platform.transport.http;
+package com.sunmoon.platform.api;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sunmoon.platform.domain.order.Order;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
+import com.sunmoon.platform.transport.http.RestEndpoint;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.netty.buffer.Unpooled;

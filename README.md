@@ -5,10 +5,19 @@ runtime hosting Socket, REST API, WebSocket, and Batch Job together —
 open-source-first, targeting 1,000-10,000 concurrent connections, and
 deliberately **Spring-free**.
 
+Two repositories were split out of this one (`docs/adr/0014`):
+[**sun-moon-platform-core**](https://github.com/schware/sun-moon-platform-core)
+is the kernel both services are built on and arrives here as the `core/`
+submodule; [**sun-moon-platform-bo**](https://github.com/schware/sun-moon-platform-bo)
+is Back Office, which used to live in this process. Clone accordingly:
+
+```bash
+git clone --recurse-submodules https://github.com/schware/sun-moon-java-platform.git
+```
+
 📐 **[`docs/DESIGN.md`](docs/DESIGN.md)** ([한국어](docs/DESIGN_kr.md)) — the
-as-built design: runtime topology, layering, BO permission model, batch
-engine, data model, and an honest list of what isn't built yet. Start
-there. For *why* each decision was made, see [`docs/adr/`](docs/adr/).
+as-built design: runtime topology, layering, batch engine, data model, and
+an honest list of what isn't built yet. Start there. For *why* each decision was made, see [`docs/adr/`](docs/adr/).
 
 🚀 **[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)** ([한국어](docs/DEPLOYMENT_kr.md)) —
 runbook for deploying to the owner's Debian server.
@@ -24,16 +33,14 @@ C/C++ sides.
 **Working scaffold, not a finished system.** Verified live (see
 `docs/adr/0003`):
 
-**Ports** (`docs/adr/0009`) — one runtime, three listeners:
+**Ports** (`docs/adr/0013`) — two listeners, this runtime's slots in the
+family-wide scheme:
 
 | Port | Listener | Serves | Override |
 |---|---|---|---|
-| 8080 | BO | `/health`, `/metrics`, `/bo/*` | `BO_PORT` |
-| 8083 | Order API | `/health`, `/orders`, WebSocket `/ws` | `API_PORT` |
-| 9090 | Socket | raw TCP (echo) | `SOCKET_PORT` |
+| 8083 | API | `/health`, `/metrics`, `/orders`, WebSocket `/ws` | `API_PORT` |
+| 9011 | Socket | raw TCP (echo) | `SOCKET_PORT` |
 
-- **BO auth** (`docs/adr/0004`/`0006`): `POST /bo/auth/login`/`logout`, `GET /bo/auth/me`, session cookie (`HttpOnly`+`SameSite=Lax`), BCrypt password hashing, a 3-tier permission model (super admin / per-screen / per-screen-per-action), enforced via an `AuthorizedEndpoint` decorator. First operator is seeded on startup from `BO_ADMIN_USERNAME`/`BO_ADMIN_PASSWORD`.
-- **BO Common Code CRUD** (`docs/adr/0008`) and **BO Device CRUD** (`docs/adr/0009`): `GET`/`POST`/`PUT`/`DELETE` on `/bo/common-code` and `/bo/devices` — each permission-checked against the matching 조회/신규/저장/삭제 action. Devices are master data only; connection state belongs to the (unbuilt) Device Server.
 - **Order API**: `POST /orders` (Jakarta Bean Validation + Resilience4j), WebSocket `/ws` (echo)
 - **Batch**: a hand-rolled Job/Step/Chunk engine, triggered by a real Quartz `Scheduler`
 - **Metrics**: Micrometer → Prometheus text format; **Tracing**: OpenTelemetry spans (logging exporter)
@@ -46,8 +53,8 @@ adapters can be switched on — setting `POSTGRES_JDBC_URL` is the switch.
 
 **Not live-verified — no local Postgres/Redis/Kafka in this dev
 environment, by choice** (see `docs/adr/0003`, `docs/adr/0005`): the real
-`MyBatisOrderRepository`/`MyBatisOperatorRepository`/`MyBatisCommonCodeRepository`
-(PostgreSQL, swapped from Oracle), `RedissonCacheClient` (Redis), and
+`MyBatisOrderRepository` (PostgreSQL, swapped from Oracle),
+`RedissonCacheClient` (Redis), and
 `KafkaEventPublisher` (Kafka) adapters exist and compile, but `Bootstrap`
 wires in their in-memory fakes by default, and no test exercises the real
 ones. Verification is deferred to the actual server deployment. A
@@ -59,7 +66,7 @@ ones. Verification is deferred to the actual server deployment. A
 |---|---|---|
 | Core Runtime / Transport | Netty (raw — no Reactor Netty, no Spring WebFlux) | Yes |
 | Batch Scheduler | Quartz (triggers a hand-rolled Job/Step/Chunk engine) | Yes |
-| Persistence | MyBatis + Oracle, HikariCP, Flyway | No — see `docs/adr/0003` |
+| Persistence | MyBatis + PostgreSQL, HikariCP, Flyway | No — see `docs/adr/0005` |
 | Cache / Session / Lock | Redis, Redisson | No — see `docs/adr/0003` |
 | Event Bus | Kafka | No — see `docs/adr/0003` |
 | Logging | Logback | Yes |
@@ -86,20 +93,12 @@ install is needed.
 Then, from another shell:
 
 ```
-# BO (8080)
-curl http://localhost:8080/health
+curl http://localhost:8083/health
 # {"status":"UP"}
 
-curl http://localhost:8080/metrics
+curl http://localhost:8083/metrics
 # Prometheus text-format scrape, including health_check_requests_total
 
-# BO needs a session; set BO_ADMIN_USERNAME/BO_ADMIN_PASSWORD before ./gradlew run,
-# then log in and keep the cookie:
-curl -c cookies.txt -X POST http://localhost:8080/bo/auth/login \
-  -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"...\"}"
-curl -b cookies.txt http://localhost:8080/bo/devices
-
-# Order API (8083)
 curl -X POST http://localhost:8083/orders -H "Content-Type: application/json" -d "{\"customerId\":\"cust-1\",\"amount\":42.50}"
 # 201 {"customerId":"cust-1","amount":42.50,"id":1}
 ```
@@ -124,21 +123,25 @@ by choice (see `docs/adr/0005`, `docs/adr/0007`).
 ## Structure
 
 ```
+core/                         the kernel, as a git submodule — Netty listener
+                              binding, REST routing, off-event-loop execution,
+                              shared MyBatis/Flyway/Micrometer/OTel wiring
 src/main/java/com/sunmoon/platform/
   Bootstrap.java              composition root — manual wiring, no DI container
-  core/                       Core Runtime (Netty listeners, config)
-  transport/http/             REST transport (router, listener specs, endpoints)
-  transport/http/bo/          BO auth + the AuthorizedEndpoint permission decorator
-  transport/http/bo/commoncode/, .../device/   BO screens (CRUD endpoints)
-  transport/ws/, transport/socket/             WebSocket and raw Socket transports
+  PlatformConfig.java         this runtime's two ports and its worker-pool size
+  api/                        the REST endpoints this runtime serves
+  transport/ws/, transport/socket/   WebSocket and raw Socket transports
   batch/                      Job/Step/Chunk engine + Quartz scheduling
-  domain/                     order, operator, commoncode, device — records + ports
+  domain/order/               records + ports
   infrastructure/persistence/ MyBatis+Postgres (real, unverified) / in-memory (fake, tested)
-  infrastructure/auth/        session store + BCrypt hashing
   infrastructure/cache/       Redisson (real, unverified) / in-memory (fake, tested)
   infrastructure/messaging/   Kafka (real, unverified) / in-memory (fake, tested)
-  observability/              Micrometer + OpenTelemetry wiring
 ```
+
+Everything the kernel owns lives in `core/` and is imported from
+`com.sunmoon.platform.core.*` / `.transport.http.*` / `.observability.*` —
+no package is split between this repository and the submodule, so an import
+tells you which side of the boundary a class is on.
 
 Grows one package at a time as each piece is actually built — see
 `docs/adr/` for the reasoning behind each addition as it happens.

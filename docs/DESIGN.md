@@ -19,8 +19,7 @@ describes the resulting system. ADR references appear throughout.
 ## 1. What this is
 
 A Java **Enterprise Runtime Platform**: one JVM process that hosts a REST
-API, a Back Office (BO) admin API, a WebSocket transport, a raw TCP Socket
-transport, and a Batch engine — DDD-structured, built on Netty, targeting
+API, a WebSocket transport, a raw TCP Socket transport, and a Batch engine — DDD-structured, built on Netty, targeting
 1,000-10,000 concurrent connections, with **no Spring anywhere**
 (ADR-0002, ADR-0010 in `Alignment`).
 
@@ -56,13 +55,11 @@ One process. One `NioEventLoopGroup` boss (1 thread) + one worker group
 ```
                        ┌──────────────────────── one JVM ─────────────────────────┐
                        │                                                          │
-  BO Frontend  ──8080──┼─▶ HTTP listener "BO"        ─┐                           │
-  (future SPA)         │     /health /metrics /bo/*   │                           │
-                       │                              │                           │
-  API clients  ──8083──┼─▶ HTTP listener "Order API" ─┼─▶ shared boss + worker    │
-  WS clients           │     /health /orders /ws      │   event-loop groups       │
-                       │                              │                           │
-  Devices      ──9090──┼─▶ Socket listener           ─┘                           │
+  API clients  ──8083──┼─▶ HTTP listener "API"       ─┐                           │
+  WS clients           │     /health /metrics         │                           │
+                       │     /orders /ws              ├─▶ shared boss + worker    │
+                       │                              │   event-loop groups       │
+  Devices      ──9011──┼─▶ Socket listener           ─┘                           │
                        │                                                          │
                        │   Quartz scheduler ─▶ Batch engine (own thread pool)     │
                        └──────────────────────────────────────────────────────────┘
@@ -70,18 +67,14 @@ One process. One `NioEventLoopGroup` boss (1 thread) + one worker group
 
 | Port | Listener | Serves | WebSocket | Env override |
 |---|---|---|---|---|
-| 8080 | BO | `/health`, `/metrics`, `/bo/*` | no | `BO_PORT` |
-| 8083 | Order API | `/health`, `/orders`, `/ws` | yes | `API_PORT` |
-| 9090 | Socket | raw TCP (echo) | — | `SOCKET_PORT` |
+| 8083 | API | `/health`, `/metrics`, `/orders`, `/ws` | yes | `API_PORT` |
+| 9011 | Socket | raw TCP (echo) | — | `SOCKET_PORT` |
 
-`/health` is on both HTTP listeners deliberately: each is independently
-probeable. `/metrics` sits on BO because BO is the operational surface.
-
-The ports above are the **code defaults**. Where they land on a
-deployment target is a separate question — the owner's server has its own
-port-numbering scheme (BO 8080, API services 8081-8089, Socket 9090) that
-does not yet fit a single container binding three of them. Deployment is
-paused on that point; see ADR-0013.
+These are this runtime's slots in the family-wide scheme (ADR-0013): the
+8081-8089 band for REST APIs, 90x1 for sockets by language. 8083 is where
+the existing Spring Order service is expected to hand over; until this
+runtime has a business function of its own, that number is reserved rather
+than occupied.
 
 **Threading.** Event-loop threads run the codec and the router only.
 `RestEndpoint.handle()` is dispatched to a **bounded worker pool**
@@ -98,26 +91,28 @@ an endpoint that throws answers 500. Batch runs on Quartz's own
 Hexagonal, expressed as packages under `com.sunmoon.platform`:
 
 ```
-transport/          inbound adapters — Netty pipelines, routing, endpoints
-  http/             REST: router, listener specs, shared response/validation helpers
-  http/bo/          BO auth + the permission decorator
-  http/bo/commoncode/, http/bo/device/   BO screens
+core/               the kernel, a git submodule (com.sunmoon.platform.core,
+                      .transport.http, .observability, .infrastructure.persistence)
+                      — listener binding, REST routing, off-event-loop execution,
+                      shared MyBatis/Flyway/Micrometer/OTel wiring
+api/                inbound adapters — the REST endpoints this runtime serves
+transport/
   ws/, socket/      WebSocket and raw TCP handlers
-domain/             the model + the ports it owns (interfaces only, no framework types)
-  order/ operator/ commoncode/ device/
+domain/order/       the model + the ports it owns (interfaces only, no framework types)
 infrastructure/     outbound adapters implementing domain ports
   persistence/      MyBatis+Postgres (real) and in-memory (fake)
-  auth/             session store, BCrypt hashing
   cache/            Redisson (real) and in-memory (fake)
   messaging/        Kafka (real) and in-memory (fake)
 batch/              Job/Step/Chunk engine + Quartz scheduling
-observability/      Micrometer registry, OpenTelemetry tracer
-core/               CoreRuntime (binds listeners), RuntimeConfig
 Bootstrap.java      composition root — the only place implementations are chosen
+PlatformConfig.java the two ports and the worker-pool size
 ```
 
-**Dependency rule.** `domain` depends on nothing but the JDK. `transport`
-and `infrastructure` both depend on `domain`, never on each other.
+**Dependency rule.** `domain` depends on nothing but the JDK. `api`/
+`transport` and `infrastructure` both depend on `domain`, never on each
+other. The kernel depends on none of them — it is a library this runtime
+composes, and no package is split between the two, so an import tells you
+which side of the boundary a class is on (ADR-0014).
 `Bootstrap` is the single place that knows which adapter implements which
 port — swapping the whole system from fakes to real infrastructure is a
 change to that one file.
@@ -127,88 +122,34 @@ domain package they serve (e.g. `domain.device.DeviceRepository`).
 
 ## 5. Request lifecycle
 
-A BO request, end to end:
+A REST request, end to end:
 
 ```
 TCP → HttpServerCodec → HttpObjectAggregator → [WebSocketServerProtocolHandler]
-    → RestRequestRouter → AuthorizedEndpoint → concrete RestEndpoint → domain port → adapter
+    → RestRequestRouter → [worker pool] → concrete RestEndpoint → domain port → adapter
 ```
 
 - **Routing** (`RestRequestRouter`) matches on `RouteKey(HttpMethod, path)`,
   with the query string stripped (ADR-0008). No path variables: a target
   row's key travels in the request body (`DELETE`) or query string
   (`?group=`, `?type=`). Unmatched → 404.
-- **Authorization** (`AuthorizedEndpoint`) is a decorator, so endpoints
-  never mention auth. It resolves the session cookie, then allows the call
-  if the operator is a super admin, or if their permission for that
-  `Screen` allows that `Action`. Otherwise 401 (no session) or 403.
 - **Endpoints** implement a single-method interface
   (`RestEndpoint: FullHttpRequest → FullHttpResponse`), parse and validate
   their body, call domain ports, and return JSON via `JsonResponses`.
 
-## 6. Back Office
+## 6. Back Office — moved
 
-### 6.1 Authentication — server-side sessions, not JWT
+Back Office lives in
+[**sun-moon-platform-bo**](https://github.com/schware/sun-moon-platform-bo)
+now, with its own design document. It was three route groups in this
+process until the port scheme made one-container-per-service the shape,
+and BO's internal-only exposure stopped fitting alongside a device-facing
+API (ADR-0014).
 
-Login issues an opaque session id stored server-side and returned in an
-`HttpOnly` + `SameSite=Lax` cookie scoped to `/bo`. Passwords are BCrypt
-hashes (cost 12, `at.favre.lib:bcrypt`).
-
-Sessions were chosen over JWT specifically so a compromised or offboarded
-operator can be revoked *immediately* by deleting one record — an admin
-panel wants that, and JWT's stateless advantage doesn't pay off while this
-is a single process (ADR-0004). Permissions are loaded once at login and
-cached in the session rather than re-read per request.
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /bo/auth/login` | verify credentials, create session, set cookie |
-| `POST /bo/auth/logout` | delete the session server-side, expire the cookie |
-| `GET /bo/auth/me` | current operator + accessible screens (drives the Frontend menu) |
-
-**First-operator bootstrap.** BO requires a login to manage operators, so
-`Bootstrap` seeds one super admin from `BO_ADMIN_USERNAME` /
-`BO_ADMIN_PASSWORD` — but only when no operator exists, and never with a
-guessable default: if the variables are unset it logs a warning and seeds
-nothing.
-
-### 6.2 Permission model — three tiers
-
-1. **Super admin** (`Operator.superAdmin`) — bypasses all checks.
-2. **Per screen** — `Screen` is a code-defined enum (`COMMON_CODE`,
-   `DEVICE`, `OPERATOR`), not a table: the screen list changes with
-   deployments, not by an operator's action.
-3. **Per action within a screen** — four independent flags on
-   `OperatorScreenPermission`: `canView` / `canCreate` / `canSave` /
-   `canDelete` (조회 / 신규 / 저장 / 삭제).
-
-Each HTTP method maps to exactly one action, which is why CRUD needs
-method-aware routing:
-
-| Method | Action | Semantics |
-|---|---|---|
-| `GET` | `VIEW` | list (optionally filtered) |
-| `POST` | `CREATE` | insert; 409 if the key exists |
-| `PUT` | `SAVE` | update; 404 if the key doesn't exist |
-| `DELETE` | `DELETE` | delete by key in the body |
-
-`create` and `save` are deliberately distinct operations, not an upsert,
-because 신규 and 저장 are distinct permissions.
-
-### 6.3 Screens
-
-| Screen | Endpoints | Model |
-|---|---|---|
-| Common Code | `/bo/common-code` (+`?group=`) | `CommonCode(groupCode, code, name, sortOrder, active)`, PK `(groupCode, code)` |
-| Device | `/bo/devices` (+`?type=`) | `Device(deviceId, name, deviceType, location, active)`, PK `deviceId` |
-
-`Device.deviceType` is expected to reference a `DEVICE_TYPE` Common Code
-but is **not** a foreign key: Common Codes are runtime-editable, and a
-dangling type should not make a device row unreadable.
-
-**Devices are master data only.** Connection state, handshake and
-protocol belong to a separate **Device Server** that does not exist yet
-(ADR-0004). BO never touches live connections.
+What went with it: the operator/commoncode/device domains, session auth
+and the `AuthorizedEndpoint` permission decorator, their MyBatis adapters,
+and migrations V2-V4 (renumbered V1-V3 there). Both services are built on
+the same kernel, which arrives in each as the `core/` submodule.
 
 ## 7. Batch
 
@@ -248,9 +189,11 @@ for MyBatis to populate, a `*Mapper` interface holding the SQL, and a
 | Migration | Table | Key |
 |---|---|---|
 | `V1` | `orders` | `id` |
-| `V2` | `operators`, `operator_screen_permissions` | `id`; `(operator_id, screen)` |
-| `V3` | `common_codes` | `(group_code, code)` |
-| `V4` | `devices` | `device_id` |
+
+BO's migrations left with BO and are numbered from V1 there, so each
+service needs its own database. Pointing both at one does not corrupt it —
+Flyway refuses to migrate a history table holding applied migrations it
+cannot resolve locally.
 
 Connection settings come from `POSTGRES_JDBC_URL` / `POSTGRES_USER` /
 `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE`.
@@ -261,7 +204,7 @@ Connection settings come from `POSTGRES_JDBC_URL` / `POSTGRES_USER` /
 
 | Concern | Mechanism | State |
 |---|---|---|
-| Configuration | environment variables via `RuntimeConfig` and `*Settings.fromEnv()` | working |
+| Configuration | environment variables via `PlatformConfig` and `*Settings.fromEnv()` | working |
 | Logging | Logback → console | working |
 | Metrics | Micrometer `PrometheusMeterRegistry`, scraped at `GET /metrics` | working, verified |
 | Tracing | OpenTelemetry SDK with a logging span exporter | working, verified |
@@ -274,27 +217,25 @@ Connection settings come from `POSTGRES_JDBC_URL` / `POSTGRES_USER` /
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BO_PORT` | `PORT`, else `8080` | BO listener. PaaS hosts inject `PORT` and require the published service to bind it (ADR-0011) |
-| `API_PORT` | `8083` | Order API listener |
-| `SOCKET_PORT` | `9090` | raw Socket listener |
+| `API_PORT` | `PORT`, else `8083` | the REST/WebSocket listener. PaaS hosts inject `PORT` and require the published service to bind it (ADR-0011) |
+| `SOCKET_PORT` | `9011` | raw Socket listener |
 | `WORKER_THREADS` | `cores × 4` | pool REST endpoints run on (ADR-0010) |
-| `COOKIE_SECURE` | `false` | `Secure` on the BO session cookie — must be `true` behind TLS |
-| `BO_ADMIN_USERNAME` / `BO_ADMIN_PASSWORD` | none | first super admin, seeded only if no operator exists |
 | `POSTGRES_JDBC_URL` | none | **the switch**: set → real MyBatis/Postgres adapters + Flyway; unset → in-memory fakes |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE` | `app` / `app` / `5` | database credentials and pool size |
 | `REDIS_URL` | `redis://localhost:6379` | Redisson (unused — no real `SessionStore`/`CacheClient` adapter is wired) |
 
 ## 11. Testing strategy
 
-26 tests, all passing, in two styles:
+11 tests here, all passing, in two styles — 26 across the three
+repositories (12 in BO, 3 in the kernel).
 
-- **Live HTTP tests.** `CoreRuntimeTransportsTest`, `BoAuthTest`,
-  `CommonCodeCrudTest`, `DeviceCrudTest`, `BlockingWorkOffloadTest` start
-  the real `CoreRuntime` on test ports and drive it with real clients —
-  `java.net.http.HttpClient` (including its WebSocket client and a cookie
-  manager) and a raw `java.net.Socket`. Nothing is mocked; these exercise
-  the actual Netty pipeline, routing, session cookies, permission checks,
-  and the fact that endpoints really do run off the event loop.
+- **Live HTTP tests.** `CoreRuntimeTransportsTest` starts the real
+  `CoreRuntime` on test ports and drives it with real clients —
+  `java.net.http.HttpClient` (including its WebSocket client) and a raw
+  `java.net.Socket`. Nothing is mocked; it exercises the actual Netty
+  pipeline and routing. `BlockingWorkOffloadTest`, which proves endpoints
+  run off the event loop, moved to the kernel repository that now enforces
+  that property.
 - **Unit tests** for the pieces with no transport: the Batch engine
   (directly and through a real Quartz scheduler) and the in-memory
   adapters.
@@ -307,34 +248,27 @@ environment doesn't have (ADR-0003).
 
 Ordered by what would bite first in production.
 
-1. **No live database verification.** All MyBatis mappers, all four Flyway
-   migrations, and `MyBatisConfig` compile but have never executed against
+1. **No live database verification.** The MyBatis mappers, the Flyway
+   migration, and `MyBatisConfig` compile but have never executed against
    a real PostgreSQL instance. What *is* verified is that the switch
    engages and fails loudly: running the packaged app with
    `POSTGRES_JDBC_URL` pointing at nothing exits with a HikariCP failure
    rather than silently falling back to fakes. First real exercise is the
    deployment to the Debian server (ADR-0012, `DEPLOYMENT.md`).
-2. **`SessionStore` has no real adapter.** Only `InMemorySessionStore`
-   exists, so sessions die with the process and cannot be shared across
-   instances — meaning the deployed service cannot scale past one
-   instance, and every deploy logs everyone out. A `RedisSessionStore` is
-   the intended real adapter.
-3. **No Operator management screen.** Operators and their permissions can
-   only be created by the startup seed or by calling the repository
-   directly (`InMemoryOperatorRepository.grantPermission`, test-only). The
-   `OPERATOR` screen enum value exists with nothing behind it.
-4. **No CORS handling.** Required once a Frontend runs on its own origin
-   and calls BO with `credentials: include`.
-5. **HTTP pipelining could reorder responses.** Offloading endpoints
+2. **This runtime has no business function yet.** `POST /orders` is a
+   working REST endpoint, but the Order domain here is a module built to
+   prove the shape; what it will actually do is undecided. That is why
+   8083 is reserved rather than occupied.
+3. **HTTP pipelining could reorder responses.** Offloading endpoints
    (ADR-0010) means two requests sent on one connection without waiting
    may finish out of order. Normal keep-alive clients wait for each
    response, so this doesn't arise in practice; documented rather than
    fixed.
-6. **Socket and WebSocket transports are echo handlers.** They prove the
+4. **Socket and WebSocket transports are echo handlers.** They prove the
    transports work; they carry no protocol.
-7. **The Dockerfile has never been built** — no Docker here (ADR-0003).
+5. **The Dockerfile has never been built** — no Docker here (ADR-0003).
    The packaged `installDist` output it runs *is* verified to boot.
-8. **Not deployed.** Everything in the repo is ready (ADR-0011,
+6. **Not deployed.** Everything in the repo is ready (ADR-0011,
    ADR-0012, `DEPLOYMENT.md`); the remaining steps need `sudo` on the
    target server — creating the database and opening the firewall.
 
@@ -354,6 +288,8 @@ Ordered by what would bite first in production.
 | [0010](adr/0010-run-endpoints-off-the-event-loop.md) | Endpoints run on a bounded worker pool |
 | [0011](adr/0011-deployment-mechanics.md) | Dockerfile, PORT, adapter selection, Secure cookie |
 | [0012](adr/0012-deploy-to-own-debian-server.md) | Deploy to the owner's Debian server instead |
+| [0013](adr/0013-withdraw-port-8084.md) | Withdraw port 8084; the family-wide port scheme |
+| [0014](adr/0014-split-the-kernel-from-the-domains-built-on-it.md) | Split the kernel out; BO becomes its own repository |
 
 The deployment runbook is [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
