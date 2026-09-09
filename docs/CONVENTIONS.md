@@ -252,10 +252,32 @@ done
 
 - **One database per service**, named `<service>_service`
   (`order_service`, `delivery_service`, `bo_service`). KDS uses Redis.
-- Schema is `src/main/resources/schema.sql` with
-  `spring.sql.init.mode: always` — **not Flyway**. This creates tables and
-  cannot evolve them; changing an existing column is a manual migration
-  today. Worth revisiting when a schema change first hurts.
+- Schema: **Flyway is where this family is going**, and `order` is the
+  first service there. The others still use
+  `src/main/resources/schema.sql` with `spring.sql.init.mode: always`.
+
+  It changed because the schema.sql approach hurt exactly as predicted.
+  An idempotent `CREATE` can add a column; it cannot touch the rows
+  already in the table. When Order gained a life cycle, two rows written
+  before it deserialized with a null timestamp and stopped the expiry
+  sweep for every other order — once every ten seconds, in a stack trace
+  that named the sweep rather than the data.
+
+  A migration fixed it in one file. `schema.sql` could not have.
+
+  ```bash
+  for s in $SERVICES; do
+    printf '%-9s %s
+' "$s"       "$( [ -d $s/src/main/resources/db/migration ] && echo flyway || echo schema.sql )"
+  done
+  ```
+
+  Moving a service across: add `flyway-core` and
+  `flyway-database-postgresql`, move `schema.sql` into
+  `db/migration/V1__*.sql`, drop `spring.sql.init.mode`, and set
+  `baseline-on-migrate: true` with `baseline-version: 1` — the deployed
+  database already has the tables, and baseline adopts them instead of
+  refusing to start on a non-empty schema.
 - Order and Delivery store a JSONB blob because they were designed as
   document stores before MongoDB turned out to need AVX this CPU lacks
   (ADR-0001). BO uses plain columns. **The storage shape is per-service**;
