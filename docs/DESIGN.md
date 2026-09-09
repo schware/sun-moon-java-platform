@@ -356,7 +356,12 @@ Ordered by what would bite first in production.
    accepts any well-formed `(storeId, deviceId)`; it does not ask BO
    whether that device is real or belongs to that store. The real
    implementation needs service-to-service credentials between this
-   server and BO, which have not been decided (`docs/adr/0016`).
+   server and BO, which have not been decided (`docs/adr/0016`). One
+   direction for the terminal side of this: log in with an id/password
+   rather than typing a store and device id, and resolve both from that
+   credential server-side — folds authentication and identity resolution
+   into one step, and removes two free-text fields an operator has to
+   get right today.
 2. **"One order-receiving terminal per store" is not enforced.** The
    owner's rule — several terminals may exist at a store, but only one
    receives orders — has no home yet. It needs a `receivesOrders` flag on

@@ -112,7 +112,12 @@ silently in this pass.
   accepts any well-formed id; it does not ask BO whether that device
   actually exists or belongs to that store. The real check needs
   service-to-service credentials between this server and BO, which have
-  not been decided.
+  not been decided. One direction floated for this: a terminal logs in
+  with an id/password instead of typing a store and device id by hand,
+  and the store and terminal type are resolved from that credential on
+  the server side — folding authentication and identity resolution into
+  one step, and removing the two free-text fields a POS operator has to
+  get right today.
 - **"One order-receiving terminal per store" is not enforced.** The
   owner's rule — a store may have several terminals, but only one
   receives orders — has no home yet. It needs a `receivesOrders` flag on
