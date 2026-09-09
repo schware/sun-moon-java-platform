@@ -34,10 +34,12 @@ public final class LoginEndpoint implements RestEndpoint {
 
     private final OperatorRepository operatorRepository;
     private final SessionStore sessionStore;
+    private final boolean secureCookie;
 
-    public LoginEndpoint(OperatorRepository operatorRepository, SessionStore sessionStore) {
+    public LoginEndpoint(OperatorRepository operatorRepository, SessionStore sessionStore, boolean secureCookie) {
         this.operatorRepository = operatorRepository;
         this.sessionStore = sessionStore;
+        this.secureCookie = secureCookie;
     }
 
     @Override
@@ -76,7 +78,7 @@ public final class LoginEndpoint implements RestEndpoint {
         cookie.setHttpOnly(true);
         cookie.setPath("/bo");
         cookie.setSameSite(CookieHeaderNames.SameSite.Lax);
-        // .setSecure(true) once served over TLS — this dev environment is plain HTTP (docs/adr/0004).
+        cookie.setSecure(secureCookie); // COOKIE_SECURE — on wherever this is served over TLS
         response.headers().add(HttpHeaderNames.SET_COOKIE, ServerCookieEncoder.STRICT.encode(cookie));
         return response;
     }

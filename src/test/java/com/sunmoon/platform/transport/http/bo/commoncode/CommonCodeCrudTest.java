@@ -52,7 +52,7 @@ class CommonCodeCrudTest {
         grantViewOnly(operatorRepository, viewOnly.id());
 
         Map<RouteKey, RestEndpoint> routes = Map.of(
-                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore),
+                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore, false),
                 new RouteKey(HttpMethod.GET, "/bo/common-code"),
                 new AuthorizedEndpoint(Screen.COMMON_CODE, Action.VIEW, sessionStore, new ListCommonCodeEndpoint(commonCodeRepository)),
                 new RouteKey(HttpMethod.POST, "/bo/common-code"),
@@ -64,7 +64,7 @@ class CommonCodeCrudTest {
         );
 
         CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-common-code", HTTP_PORT, routes, false)), SOCKET_PORT);
+                List.of(new HttpListenerSpec("test-common-code", HTTP_PORT, routes, false)), SOCKET_PORT, 4);
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

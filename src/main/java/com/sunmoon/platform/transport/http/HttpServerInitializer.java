@@ -9,6 +9,7 @@ import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 
 import java.util.Map;
+import java.util.concurrent.Executor;
 
 /**
  * When WebSocket is enabled, REST and WebSocket share this listener's port
@@ -26,10 +27,13 @@ public final class HttpServerInitializer extends ChannelInitializer<SocketChanne
 
     private final Map<RouteKey, RestEndpoint> routes;
     private final boolean webSocketEnabled;
+    private final Executor blockingWorkExecutor;
 
-    public HttpServerInitializer(Map<RouteKey, RestEndpoint> routes, boolean webSocketEnabled) {
+    public HttpServerInitializer(Map<RouteKey, RestEndpoint> routes, boolean webSocketEnabled,
+                                 Executor blockingWorkExecutor) {
         this.routes = routes;
         this.webSocketEnabled = webSocketEnabled;
+        this.blockingWorkExecutor = blockingWorkExecutor;
     }
 
     @Override
@@ -41,6 +45,6 @@ public final class HttpServerInitializer extends ChannelInitializer<SocketChanne
             pipeline.addLast(new WebSocketServerProtocolHandler(WEBSOCKET_PATH));
             pipeline.addLast(new WsEchoHandler());
         }
-        pipeline.addLast(new RestRequestRouter(routes));
+        pipeline.addLast(new RestRequestRouter(routes, blockingWorkExecutor));
     }
 }

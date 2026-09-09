@@ -13,13 +13,20 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The Core Runtime: one process, one pair of Netty event-loop groups,
  * several listening ports — one per {@link HttpListenerSpec} (BO and the
  * Order API each get their own, see docs/adr/0009), plus the raw Socket
- * port ({@link SocketServerInitializer}). Batch (Quartz-triggered) runs on
- * the same JVM but off the event loop entirely — see {@code batch} package.
+ * port ({@link SocketServerInitializer}).
+ *
+ * <p>It also owns the bounded worker pool that REST endpoints run on, so
+ * blocking work (JDBC, above all) never occupies an event-loop thread —
+ * see docs/adr/0010. Batch runs off the event loop too, on Quartz's own
+ * pool (see {@code batch} package).
  */
 public final class CoreRuntime {
 
@@ -27,15 +34,21 @@ public final class CoreRuntime {
 
     private final List<HttpListenerSpec> httpListeners;
     private final int socketPort;
+    private final int workerThreads;
 
-    public CoreRuntime(List<HttpListenerSpec> httpListeners, int socketPort) {
+    public CoreRuntime(List<HttpListenerSpec> httpListeners, int socketPort, int workerThreads) {
         this.httpListeners = List.copyOf(httpListeners);
         this.socketPort = socketPort;
+        this.workerThreads = workerThreads;
     }
 
     public void start() throws InterruptedException {
         EventLoopGroup bossGroup = new NioEventLoopGroup(1);
         EventLoopGroup workerGroup = new NioEventLoopGroup();
+        ExecutorService blockingWorkExecutor = Executors.newFixedThreadPool(
+                workerThreads, Thread.ofPlatform().name("platform-worker-", 0).daemon(true).factory());
+        log.info("Core Runtime: {} worker threads for blocking endpoint work", workerThreads);
+
         try {
             List<Channel> channels = new ArrayList<>();
 
@@ -43,7 +56,8 @@ public final class CoreRuntime {
                 channels.add(new ServerBootstrap()
                         .group(bossGroup, workerGroup)
                         .channel(NioServerSocketChannel.class)
-                        .childHandler(new HttpServerInitializer(listener.routes(), listener.webSocketEnabled()))
+                        .childHandler(new HttpServerInitializer(
+                                listener.routes(), listener.webSocketEnabled(), blockingWorkExecutor))
                         .bind(listener.port())
                         .sync()
                         .channel());
@@ -64,6 +78,15 @@ public final class CoreRuntime {
                 channel.closeFuture().sync();
             }
         } finally {
+            blockingWorkExecutor.shutdown();
+            try {
+                if (!blockingWorkExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    blockingWorkExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                blockingWorkExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
             workerGroup.shutdownGracefully();
             bossGroup.shutdownGracefully();
         }

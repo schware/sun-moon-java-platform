@@ -78,10 +78,15 @@ One process. One `NioEventLoopGroup` boss (1 thread) + one worker group
 probeable. BO is the port published when deployed (ADR-0007), which is why
 `/metrics` sits there.
 
-**Threading.** Netty event-loop threads run the codec, the router, and the
-endpoint handler itself. Batch runs on Quartz's own `SimpleThreadPool`,
-entirely off the event loop. There is currently **no offload of blocking
-work off the event loop** — see §12, gap 1.
+**Threading.** Event-loop threads run the codec and the router only.
+`RestEndpoint.handle()` is dispatched to a **bounded worker pool**
+(`platform-worker-N`, sized by `WORKER_THREADS`, default
+`availableProcessors × 4`), because endpoints call repositories and JDBC
+blocks — a query inline on the event loop would stall every connection
+that thread serves (ADR-0010). Responses return via `ctx.writeAndFlush`,
+which hands back to the event loop itself. Pool saturation answers 503;
+an endpoint that throws answers 500. Batch runs on Quartz's own
+`SimpleThreadPool`, also off the event loop.
 
 ## 4. Layering
 
@@ -264,23 +269,27 @@ Connection settings come from `POSTGRES_JDBC_URL` / `POSTGRES_USER` /
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BO_PORT` | `8080` | BO listener |
+| `BO_PORT` | `PORT`, else `8080` | BO listener. PaaS hosts inject `PORT` and require the published service to bind it (ADR-0011) |
 | `API_PORT` | `8083` | Order API listener |
 | `SOCKET_PORT` | `9090` | raw Socket listener |
+| `WORKER_THREADS` | `cores × 4` | pool REST endpoints run on (ADR-0010) |
+| `COOKIE_SECURE` | `false` | `Secure` on the BO session cookie — must be `true` behind TLS |
 | `BO_ADMIN_USERNAME` / `BO_ADMIN_PASSWORD` | none | first super admin, seeded only if no operator exists |
-| `POSTGRES_JDBC_URL` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE` | localhost / `app` / `app` / `5` | database (unused while fakes are wired) |
-| `REDIS_URL` | `redis://localhost:6379` | Redisson (unused while fakes are wired) |
+| `POSTGRES_JDBC_URL` | none | **the switch**: set → real MyBatis/Postgres adapters + Flyway; unset → in-memory fakes |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE` | `app` / `app` / `5` | database credentials and pool size |
+| `REDIS_URL` | `redis://localhost:6379` | Redisson (unused — no real `SessionStore`/`CacheClient` adapter is wired) |
 
 ## 11. Testing strategy
 
-23 tests, all passing, in two styles:
+26 tests, all passing, in two styles:
 
 - **Live HTTP tests.** `CoreRuntimeTransportsTest`, `BoAuthTest`,
-  `CommonCodeCrudTest`, `DeviceCrudTest` start the real `CoreRuntime` on
-  test ports and drive it with real clients — `java.net.http.HttpClient`
-  (including its WebSocket client and a cookie manager) and a raw
-  `java.net.Socket`. Nothing is mocked; these exercise the actual Netty
-  pipeline, routing, session cookies and permission checks.
+  `CommonCodeCrudTest`, `DeviceCrudTest`, `BlockingWorkOffloadTest` start
+  the real `CoreRuntime` on test ports and drive it with real clients —
+  `java.net.http.HttpClient` (including its WebSocket client and a cookie
+  manager) and a raw `java.net.Socket`. Nothing is mocked; these exercise
+  the actual Netty pipeline, routing, session cookies, permission checks,
+  and the fact that endpoints really do run off the event loop.
 - **Unit tests** for the pieces with no transport: the Batch engine
   (directly and through a real Quartz scheduler) and the in-memory
   adapters.
@@ -293,34 +302,36 @@ environment doesn't have (ADR-0003).
 
 Ordered by what would bite first in production.
 
-1. **Blocking work runs on the event loop.** Endpoints execute on Netty
-   event-loop threads and call repositories synchronously. That is
-   harmless with in-memory fakes, but JDBC is blocking: wiring the real
-   `MyBatis*Repository` implementations as-is would stall an event-loop
-   thread per query and cap throughput far below the 1,000-10,000
-   connection target. **A worker-thread offload (endpoint → executor →
-   result written back to the channel) is required before the real
-   database adapters are wired in.** This was identified as a design
-   constraint early (ADR-0002's design note) but is not yet implemented.
-2. **No live database verification.** All MyBatis mappers, all four Flyway
+1. **No live database verification.** All MyBatis mappers, all four Flyway
    migrations, and `MyBatisConfig` compile but have never executed against
-   a real PostgreSQL instance. First real exercise will be the Render+Neon
-   deployment (ADR-0007).
-3. **`SessionStore` has no real adapter.** Only `InMemorySessionStore`
+   a real PostgreSQL instance. What *is* verified is that the switch
+   engages and fails loudly: running the packaged app with
+   `POSTGRES_JDBC_URL` pointing at nothing exits with a HikariCP failure
+   rather than silently falling back to fakes. First real exercise is the
+   Render+Neon deployment (ADR-0011, `DEPLOYMENT.md`).
+2. **`SessionStore` has no real adapter.** Only `InMemorySessionStore`
    exists, so sessions die with the process and cannot be shared across
-   instances. A `RedisSessionStore` is the intended real adapter.
-4. **No Operator management screen.** Operators and their permissions can
+   instances — meaning the deployed service cannot scale past one
+   instance, and every deploy logs everyone out. A `RedisSessionStore` is
+   the intended real adapter.
+3. **No Operator management screen.** Operators and their permissions can
    only be created by the startup seed or by calling the repository
    directly (`InMemoryOperatorRepository.grantPermission`, test-only). The
    `OPERATOR` screen enum value exists with nothing behind it.
-5. **Cookie `Secure` flag is off**, since local development is plain HTTP.
-   It must be enabled once served over TLS.
-6. **No CORS handling.** Required once a Frontend runs on its own origin
+4. **No CORS handling.** Required once a Frontend runs on its own origin
    and calls BO with `credentials: include`.
-7. **Socket and WebSocket transports are echo handlers.** They prove the
+5. **HTTP pipelining could reorder responses.** Offloading endpoints
+   (ADR-0010) means two requests sent on one connection without waiting
+   may finish out of order. Normal keep-alive clients wait for each
+   response, so this doesn't arise in practice; documented rather than
+   fixed.
+6. **Socket and WebSocket transports are echo handlers.** They prove the
    transports work; they carry no protocol.
-8. **Not deployed.** Render + Neon are chosen (ADR-0007) but no
-   `Dockerfile` exists yet and nothing runs anywhere but a laptop.
+7. **The Dockerfile has never been built** — no Docker here (ADR-0003).
+   The packaged `installDist` output it runs *is* verified to boot.
+8. **Not deployed.** Everything in the repo is ready (ADR-0011,
+   `render.yaml`, `DEPLOYMENT.md`); the remaining steps need Neon and
+   Render accounts.
 
 ## 13. Decision index
 
@@ -335,6 +346,10 @@ Ordered by what would bite first in production.
 | [0007](adr/0007-deployment-target-render-neon-free-forever.md) | Deploy to Render + Neon |
 | [0008](adr/0008-common-code-crud-and-method-aware-routing.md) | Common Code CRUD; method-aware routing |
 | [0009](adr/0009-device-crud-and-port-separation.md) | Device CRUD; BO/API port split |
+| [0010](adr/0010-run-endpoints-off-the-event-loop.md) | Endpoints run on a bounded worker pool |
+| [0011](adr/0011-deployment-mechanics.md) | Dockerfile, PORT, adapter selection, Secure cookie |
+
+The deployment runbook is [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 Career-strategy context for why this repo exists lives in the separate
 `Alignment` repository.

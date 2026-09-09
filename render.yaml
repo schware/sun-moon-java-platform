@@ -1,0 +1,33 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# The database is NOT defined here on purpose: Render's own free Postgres
+# expires after 30 days, which fails the "permanently free" requirement
+# (docs/adr/0007). Postgres comes from Neon instead, and its connection
+# details are set as environment variables (sync: false = prompted once in
+# the Render dashboard, never committed).
+services:
+  - type: web
+    name: sun-moon-bo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    # Render injects PORT and expects the published service to bind it;
+    # RuntimeConfig maps PORT onto the BO listener.
+    healthCheckPath: /health
+    envVars:
+      - key: COOKIE_SECURE
+        value: "true"          # Render terminates TLS, so the session cookie must be Secure
+      - key: WORKER_THREADS
+        value: "8"             # free plan is small; keep it near POSTGRES_POOL_SIZE
+      - key: POSTGRES_POOL_SIZE
+        value: "5"
+      - key: POSTGRES_JDBC_URL
+        sync: false            # jdbc:postgresql://<neon-host>/<db>?sslmode=require
+      - key: POSTGRES_USER
+        sync: false
+      - key: POSTGRES_PASSWORD
+        sync: false
+      - key: BO_ADMIN_USERNAME
+        sync: false
+      - key: BO_ADMIN_PASSWORD
+        sync: false

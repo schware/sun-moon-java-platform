@@ -46,7 +46,7 @@ class CoreRuntimeTransportsTest {
         CoreRuntime runtime = new CoreRuntime(
                 List.of(new HttpListenerSpec("test", HTTP_PORT,
                         Map.of(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()), true)),
-                SOCKET_PORT);
+                SOCKET_PORT, 4);
         runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

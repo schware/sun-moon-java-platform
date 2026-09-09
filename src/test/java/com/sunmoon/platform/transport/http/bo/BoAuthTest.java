@@ -51,7 +51,7 @@ class BoAuthTest {
         RestEndpoint protectedEndpoint = request -> JsonResponses.of(HttpResponseStatus.OK, Map.of("ok", true));
 
         Map<RouteKey, RestEndpoint> routes = Map.of(
-                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore),
+                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore, false),
                 new RouteKey(HttpMethod.POST, "/bo/auth/logout"), new LogoutEndpoint(sessionStore),
                 new RouteKey(HttpMethod.GET, "/bo/auth/me"), new MeEndpoint(sessionStore),
                 new RouteKey(HttpMethod.GET, "/bo/common-code"),
@@ -59,7 +59,7 @@ class BoAuthTest {
         );
 
         CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-bo", HTTP_PORT, routes, false)), SOCKET_PORT);
+                List.of(new HttpListenerSpec("test-bo", HTTP_PORT, routes, false)), SOCKET_PORT, 4);
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

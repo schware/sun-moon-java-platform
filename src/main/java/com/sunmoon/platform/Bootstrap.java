@@ -16,10 +16,17 @@ import com.sunmoon.platform.infrastructure.auth.PasswordHasher;
 import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
+import com.sunmoon.platform.infrastructure.persistence.FlywayMigrator;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryCommonCodeRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryDeviceRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOrderRepository;
+import com.sunmoon.platform.infrastructure.persistence.MyBatisCommonCodeRepository;
+import com.sunmoon.platform.infrastructure.persistence.MyBatisConfig;
+import com.sunmoon.platform.infrastructure.persistence.MyBatisDeviceRepository;
+import com.sunmoon.platform.infrastructure.persistence.MyBatisOperatorRepository;
+import com.sunmoon.platform.infrastructure.persistence.MyBatisOrderRepository;
+import com.sunmoon.platform.infrastructure.persistence.PostgresConnectionSettings;
 import com.sunmoon.platform.transport.http.CreateOrderEndpoint;
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
 import com.sunmoon.platform.transport.http.HttpListenerSpec;
@@ -39,9 +46,11 @@ import com.sunmoon.platform.transport.http.bo.device.DeleteDeviceEndpoint;
 import com.sunmoon.platform.transport.http.bo.device.ListDeviceEndpoint;
 import com.sunmoon.platform.transport.http.bo.device.SaveDeviceEndpoint;
 import io.netty.handler.codec.http.HttpMethod;
+import org.apache.ibatis.session.SqlSessionFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.sql.DataSource;
 import java.util.List;
 import java.util.Map;
 
@@ -60,37 +69,73 @@ public final class Bootstrap {
     public static void main(String[] args) throws Exception {
         RuntimeConfig config = RuntimeConfig.fromEnv();
 
-        OrderRepository orderRepository = new InMemoryOrderRepository();
+        Repositories repositories = buildRepositories();
         EventPublisher eventPublisher = new InMemoryEventPublisher();
-        OperatorRepository operatorRepository = new InMemoryOperatorRepository();
-        CommonCodeRepository commonCodeRepository = new InMemoryCommonCodeRepository();
-        DeviceRepository deviceRepository = new InMemoryDeviceRepository();
         SessionStore sessionStore = new InMemorySessionStore();
 
-        seedSuperAdminIfNeeded(operatorRepository);
+        seedSuperAdminIfNeeded(repositories.operators());
 
         List<HttpListenerSpec> listeners = List.of(
-                new HttpListenerSpec("BO", config.boPort(),
-                        boRoutes(operatorRepository, commonCodeRepository, deviceRepository, sessionStore), false),
+                new HttpListenerSpec("BO", config.boPort(), boRoutes(repositories, sessionStore, config), false),
                 new HttpListenerSpec("Order API", config.apiPort(), apiRoutes(eventPublisher), true));
 
-        runStartupBatchJob(orderRepository);
+        runStartupBatchJob(repositories.orders());
 
-        new CoreRuntime(listeners, config.socketPort()).start();
+        new CoreRuntime(listeners, config.socketPort(), config.workerThreads()).start();
+    }
+
+    private record Repositories(
+            OrderRepository orders,
+            OperatorRepository operators,
+            CommonCodeRepository commonCodes,
+            DeviceRepository devices) {
+    }
+
+    /**
+     * The one place fakes and real adapters are chosen between. Presence of
+     * {@code POSTGRES_JDBC_URL} is the switch — no separate mode flag to
+     * keep in sync, and a machine with only a JDK still runs the whole
+     * platform on in-memory fakes (docs/adr/0003, docs/adr/0005).
+     *
+     * <p>When Postgres is configured, migrations run before any repository
+     * is handed out, so the schema is present before the super-admin seed
+     * below touches it.
+     */
+    private static Repositories buildRepositories() {
+        if (System.getenv("POSTGRES_JDBC_URL") == null) {
+            log.info("POSTGRES_JDBC_URL not set — using in-memory fake repositories");
+            return new Repositories(
+                    new InMemoryOrderRepository(),
+                    new InMemoryOperatorRepository(),
+                    new InMemoryCommonCodeRepository(),
+                    new InMemoryDeviceRepository());
+        }
+
+        PostgresConnectionSettings settings = PostgresConnectionSettings.fromEnv();
+        DataSource dataSource = MyBatisConfig.buildDataSource(settings);
+        FlywayMigrator.migrate(dataSource);
+        SqlSessionFactory sqlSessionFactory = MyBatisConfig.buildSqlSessionFactory(dataSource);
+        log.info("POSTGRES_JDBC_URL set — using PostgreSQL repositories ({})", settings.jdbcUrl());
+        return new Repositories(
+                new MyBatisOrderRepository(sqlSessionFactory),
+                new MyBatisOperatorRepository(sqlSessionFactory),
+                new MyBatisCommonCodeRepository(sqlSessionFactory),
+                new MyBatisDeviceRepository(sqlSessionFactory));
     }
 
     /** BO port: the BO screens plus the operational endpoints, since this is the port published when deployed (docs/adr/0007). */
     private static Map<RouteKey, RestEndpoint> boRoutes(
-            OperatorRepository operatorRepository,
-            CommonCodeRepository commonCodeRepository,
-            DeviceRepository deviceRepository,
-            SessionStore sessionStore) {
+            Repositories repositories, SessionStore sessionStore, RuntimeConfig config) {
+
+        CommonCodeRepository commonCodeRepository = repositories.commonCodes();
+        DeviceRepository deviceRepository = repositories.devices();
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/metrics"), new MetricsEndpoint()),
 
-                Map.entry(new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore)),
+                Map.entry(new RouteKey(HttpMethod.POST, "/bo/auth/login"),
+                        new LoginEndpoint(repositories.operators(), sessionStore, config.secureCookies())),
                 Map.entry(new RouteKey(HttpMethod.POST, "/bo/auth/logout"), new LogoutEndpoint(sessionStore)),
                 Map.entry(new RouteKey(HttpMethod.GET, "/bo/auth/me"), new MeEndpoint(sessionStore)),
 

@@ -76,10 +76,15 @@ Python, C, Java로 증명한다.
 probe할 수 있어야 한다. 배포 시 공개되는 port가 BO이고(ADR-0007), 그래서
 `/metrics`도 BO 쪽에 있다.
 
-**Threading.** Netty event-loop thread가 codec, router, 그리고 endpoint
-handler 자체를 실행한다. Batch는 Quartz 자체 `SimpleThreadPool`에서
-event loop 바깥으로 완전히 분리돼 돌아간다. 현재 **blocking 작업을 event
-loop 밖으로 넘기는 처리는 없다** — §12의 공백 1번 참고.
+**Threading.** Event-loop thread는 codec과 router만 실행한다.
+`RestEndpoint.handle()`은 **제한된 크기의 worker pool**
+(`platform-worker-N`, `WORKER_THREADS`로 조절, 기본값 `코어 수 × 4`)로
+넘긴다. endpoint가 repository를 호출하고 JDBC는 blocking이라, event loop
+위에서 쿼리를 돌리면 그 thread가 담당하는 모든 연결이 멈추기
+때문이다(ADR-0010). 응답은 `ctx.writeAndFlush`로 돌려보내며, 이 호출이
+알아서 event loop로 넘겨준다. Pool이 포화되면 503, endpoint가 예외를
+던지면 500을 반환한다. Batch도 Quartz 자체 `SimpleThreadPool`에서 event
+loop 바깥으로 분리돼 돌아간다.
 
 ## 4. 계층 구조
 
@@ -261,23 +266,27 @@ Postgres이기 때문이다(ADR-0005).
 
 | 변수 | 기본값 | 용도 |
 |---|---|---|
-| `BO_PORT` | `8080` | BO listener |
+| `BO_PORT` | `PORT`, 없으면 `8080` | BO listener. PaaS는 `PORT`를 주입하고 공개 서비스가 그 port에 바인딩하기를 요구한다(ADR-0011) |
 | `API_PORT` | `8083` | Order API listener |
 | `SOCKET_PORT` | `9090` | raw Socket listener |
+| `WORKER_THREADS` | `코어 수 × 4` | REST endpoint가 실행되는 pool 크기(ADR-0010) |
+| `COOKIE_SECURE` | `false` | BO session cookie의 `Secure` 속성 — TLS 뒤에서는 반드시 `true` |
 | `BO_ADMIN_USERNAME` / `BO_ADMIN_PASSWORD` | 없음 | 최초 super admin, 운영자가 없을 때만 seed |
-| `POSTGRES_JDBC_URL` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE` | localhost / `app` / `app` / `5` | DB (fake 결선 중에는 미사용) |
-| `REDIS_URL` | `redis://localhost:6379` | Redisson (fake 결선 중에는 미사용) |
+| `POSTGRES_JDBC_URL` | 없음 | **전환 스위치**: 설정하면 실제 MyBatis/Postgres adapter + Flyway, 없으면 in-memory fake |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_POOL_SIZE` | `app` / `app` / `5` | DB 자격 증명과 pool 크기 |
+| `REDIS_URL` | `redis://localhost:6379` | Redisson (미사용 — `SessionStore`/`CacheClient`의 실제 adapter가 결선돼 있지 않음) |
 
 ## 11. 테스트 전략
 
-23개 테스트가 모두 통과하며, 두 가지 방식이다:
+26개 테스트가 모두 통과하며, 두 가지 방식이다:
 
 - **라이브 HTTP 테스트.** `CoreRuntimeTransportsTest`, `BoAuthTest`,
-  `CommonCodeCrudTest`, `DeviceCrudTest`는 실제 `CoreRuntime`을 테스트
-  port로 띄우고 진짜 client로 두드린다 — `java.net.http.HttpClient`
-  (WebSocket client와 cookie manager 포함), 그리고 raw
-  `java.net.Socket`. mock이 없고, 실제 Netty pipeline·라우팅·session
-  cookie·권한 검사를 그대로 통과한다.
+  `CommonCodeCrudTest`, `DeviceCrudTest`, `BlockingWorkOffloadTest`는 실제
+  `CoreRuntime`을 테스트 port로 띄우고 진짜 client로 두드린다 —
+  `java.net.http.HttpClient`(WebSocket client와 cookie manager 포함),
+  그리고 raw `java.net.Socket`. mock이 없고, 실제 Netty pipeline·라우팅·
+  session cookie·권한 검사는 물론 endpoint가 정말로 event loop 바깥에서
+  실행되는지까지 그대로 확인한다.
 - **단위 테스트** — transport가 필요 없는 부분: Batch 엔진(직접 실행과
   실제 Quartz scheduler 경유 둘 다), in-memory adapter들.
 
@@ -289,31 +298,31 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
 
 운영에서 먼저 문제가 될 순서대로 정리했다.
 
-1. **Blocking 작업이 event loop에서 실행된다.** Endpoint는 Netty
-   event-loop thread에서 실행되며 repository를 동기로 호출한다. in-memory
-   fake에서는 무해하지만 JDBC는 blocking이다. 실제 `MyBatis*Repository`를
-   지금 상태로 결선하면 쿼리마다 event-loop thread 하나가 묶여서, 처리량이
-   1,000~10,000 동시 접속 목표에 한참 못 미치게 된다. **실제 DB adapter를
-   결선하기 전에 worker thread로 넘기는 처리(endpoint → executor → 결과를
-   channel에 write)가 반드시 필요하다.** 이 제약은 초기에 이미 식별됐지만
-   (ADR-0002의 설계 노트) 아직 구현되지 않았다.
-2. **실제 DB 검증이 없다.** 모든 MyBatis mapper, Flyway migration 4개,
+1. **실제 DB 검증이 없다.** 모든 MyBatis mapper, Flyway migration 4개,
    `MyBatisConfig`가 컴파일은 되지만 실제 PostgreSQL에서 실행된 적이
-   없다. 첫 실전은 Render+Neon 배포가 될 것이다(ADR-0007).
-3. **`SessionStore`에 실제 adapter가 없다.** `InMemorySessionStore`만
-   있어서 session이 프로세스와 함께 사라지고 인스턴스 간 공유도 안 된다.
-   `RedisSessionStore`가 예정된 실제 adapter다.
-4. **운영자 관리 화면이 없다.** 운영자와 권한은 시작 시 seed나 repository
+   없다. 다만 전환 스위치가 동작하고 **조용히 fake로 흘러가지 않는다는
+   것**은 확인했다 — 패키징된 앱을 `POSTGRES_JDBC_URL`이 가리키는 DB 없이
+   실행하면 HikariCP 오류로 즉시 종료한다. 첫 실전은 Render+Neon
+   배포다(ADR-0011, `DEPLOYMENT.md`).
+2. **`SessionStore`에 실제 adapter가 없다.** `InMemorySessionStore`만
+   있어서 session이 프로세스와 함께 사라지고 인스턴스 간 공유도 안 된다 —
+   즉 배포된 서비스를 인스턴스 하나 이상으로 늘릴 수 없고, 배포할 때마다
+   전원 로그아웃된다. `RedisSessionStore`가 예정된 실제 adapter다.
+3. **운영자 관리 화면이 없다.** 운영자와 권한은 시작 시 seed나 repository
    직접 호출(`InMemoryOperatorRepository.grantPermission`, 테스트 전용)로만
    만들 수 있다. `OPERATOR` 화면 enum 값은 있지만 그 뒤에 아무것도 없다.
-5. **Cookie `Secure` 플래그가 꺼져 있다.** 로컬 개발이 평문 HTTP라서
-   그렇고, TLS로 서비스되는 순간 켜야 한다.
-6. **CORS 처리가 없다.** Frontend가 별도 origin에서 `credentials: include`로
+4. **CORS 처리가 없다.** Frontend가 별도 origin에서 `credentials: include`로
    BO를 호출하는 순간 필요해진다.
-7. **Socket과 WebSocket transport는 echo handler다.** transport가
+5. **HTTP pipelining 시 응답 순서가 뒤바뀔 수 있다.** endpoint를 worker로
+   넘기면서(ADR-0010) 한 연결에서 응답을 기다리지 않고 보낸 두 요청이
+   순서가 어긋난 채 끝날 수 있다. 일반적인 keep-alive client는 응답을
+   기다리므로 실제로는 발생하지 않아, 고치지 않고 기록만 해둔다.
+6. **Socket과 WebSocket transport는 echo handler다.** transport가
    동작한다는 것만 증명하며, 프로토콜은 없다.
-8. **배포되지 않았다.** Render + Neon으로 정했지만(ADR-0007) `Dockerfile`도
-   아직 없고, 노트북 밖에서 돌아간 적이 없다.
+7. **Dockerfile을 빌드해본 적이 없다** — 이 환경에 Docker가 없다(ADR-0003).
+   다만 그것이 실행하는 `installDist` 산출물이 정상 기동하는 것은 확인했다.
+8. **배포되지 않았다.** 저장소 쪽 준비는 끝났고(ADR-0011, `render.yaml`,
+   `DEPLOYMENT.md`), 남은 단계는 Neon과 Render 계정이 필요하다.
 
 ## 13. 결정 색인
 
@@ -328,6 +337,10 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
 | [0007](adr/0007-deployment-target-render-neon-free-forever.md) | Render + Neon 배포 |
 | [0008](adr/0008-common-code-crud-and-method-aware-routing.md) | 공통코드 CRUD, 메서드 인식 라우팅 |
 | [0009](adr/0009-device-crud-and-port-separation.md) | 장비 CRUD, BO/API port 분리 |
+| [0010](adr/0010-run-endpoints-off-the-event-loop.md) | Endpoint를 worker pool에서 실행 |
+| [0011](adr/0011-deployment-mechanics.md) | Dockerfile, PORT, adapter 선택, Secure cookie |
+
+배포 절차는 [`DEPLOYMENT.md`](DEPLOYMENT.md)에 있다.
 
 이 저장소가 왜 존재하는지에 대한 커리어 전략 맥락은 별도의 `Alignment`
 저장소에 있다.

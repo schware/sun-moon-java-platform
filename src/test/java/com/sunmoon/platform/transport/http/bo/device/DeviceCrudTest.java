@@ -54,7 +54,7 @@ class DeviceCrudTest {
                 new OperatorScreenPermission(Screen.DEVICE, true, true, false, false));
 
         Map<RouteKey, RestEndpoint> routes = Map.of(
-                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore),
+                new RouteKey(HttpMethod.POST, "/bo/auth/login"), new LoginEndpoint(operatorRepository, sessionStore, false),
                 new RouteKey(HttpMethod.GET, "/bo/devices"),
                 new AuthorizedEndpoint(Screen.DEVICE, Action.VIEW, sessionStore, new ListDeviceEndpoint(deviceRepository)),
                 new RouteKey(HttpMethod.POST, "/bo/devices"),
@@ -65,7 +65,7 @@ class DeviceCrudTest {
                 new AuthorizedEndpoint(Screen.DEVICE, Action.DELETE, sessionStore, new DeleteDeviceEndpoint(deviceRepository)));
 
         CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-device", HTTP_PORT, routes, false)), SOCKET_PORT);
+                List.of(new HttpListenerSpec("test-device", HTTP_PORT, routes, false)), SOCKET_PORT, 4);
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();
