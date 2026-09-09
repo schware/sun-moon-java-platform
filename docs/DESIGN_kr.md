@@ -137,15 +137,21 @@ TCP → HttpServerCodec → HttpObjectAggregator → [WebSocketServerProtocolHan
 ## 6. Back Office — 이전됨
 
 Back Office는 이제
-[**sun-moon-platform-bo**](https://github.com/schware/sun-moon-platform-bo)에
+[**sun-moon-java-platform-bo**](https://github.com/schware/sun-moon-java-platform-bo)에
 있고 설계서도 그쪽에 있다. Port 체계가 service당 container 하나를 전제하게
 되고, 내부 전용인 BO가 장비를 마주하는 API 옆자리에 더는 맞지 않게 되면서
 분리했다(ADR-0014).
 
 같이 간 것: operator/commoncode/device domain, session 인증과
-`AuthorizedEndpoint` 권한 decorator, 그 MyBatis adapter, migration
-V2~V4(그쪽에서 V1~V3으로 번호를 다시 매겼다). 두 service는 같은 kernel
-위에 서고, kernel은 각 저장소에 `core/` submodule로 들어온다.
+`AuthorizedEndpoint` 권한 decorator, migration V2~V4.
+
+**그 뒤 한 걸음 더 갔다.** BO는 잠시 이 kernel 위의 별도 Netty service로
+돌았지만, 지금은 `main` 브랜치 계열의 **Spring** service다. Netty 구현은
+[sun-moon-platform-bo-netty](https://github.com/schware/sun-moon-platform-bo-netty)로
+archive했다. BO는 처리량 요구가 없는 관리 화면이라, session·BCrypt·행위별
+권한을 직접 만들어서 얻는 것이 `spring-boot-starter-security`가 이미 주는
+것 이상은 아니었다(ADR-0015). 권한 모델 자체 — 3단계, `create`와 `save`를
+나눈 것 — 는 그대로 살아남았다. 자리만 옮겼을 뿐이다.
 
 ## 7. Batch
 
@@ -283,6 +289,7 @@ Testcontainers가 자연스러운 도구지만 Docker가 필요하고, 이 환�
 | [0012](adr/0012-deploy-to-own-debian-server.md) | Render 대신 본인 Debian 서버에 배포 |
 | [0013](adr/0013-withdraw-port-8084.md) | Port 8084 철회, 계열 전체 port 체계 |
 | [0014](adr/0014-split-the-kernel-from-the-domains-built-on-it.md) | Kernel 분리, BO는 자기 저장소로 |
+| [0015](adr/0015-bo-returns-to-spring-and-leaves-this-lineage.md) | BO는 Spring으로, Netty 구현은 archive |
 
 배포 절차는 [`DEPLOYMENT.md`](DEPLOYMENT.md)에 있다.
 

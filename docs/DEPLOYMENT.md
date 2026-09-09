@@ -5,7 +5,7 @@
 > ⚠️ **Superseded in part, as of 2026-09-09.** This runbook was written
 > when BO and this runtime were one container. They are two services now
 > (ADR-0014): **BO deploys from
-> [sun-moon-platform-bo](https://github.com/schware/sun-moon-platform-bo)
+> [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo)
 > on 8080, LAN-only**, and this runtime keeps the API and Socket
 > listeners. Every step below — clone, build, env file, database,
 > verification — still applies to each service separately, with two

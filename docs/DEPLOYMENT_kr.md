@@ -5,7 +5,7 @@
 > ⚠️ **2026-09-09 기준 일부 대체됨.** 이 절차서는 BO와 이 runtime이 한
 > 컨테이너였을 때 쓴 것입니다. 지금은 두 service입니다(ADR-0014) —
 > **BO는
-> [sun-moon-platform-bo](https://github.com/schware/sun-moon-platform-bo)에서
+> [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo)에서
 > 8080, LAN 전용으로 배포**하고, 이 runtime은 API와 Socket listener를
 > 가집니다. 아래 모든 단계(clone, 빌드, env 파일, DB, 검증)는 각
 > service에 대해 그대로 유효하며, 달라지는 것은 둘뿐입니다 —

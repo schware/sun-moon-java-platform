@@ -5,15 +5,22 @@ runtime hosting Socket, REST API, WebSocket, and Batch Job together —
 open-source-first, targeting 1,000-10,000 concurrent connections, and
 deliberately **Spring-free**.
 
-Two repositories were split out of this one (`docs/adr/0014`):
 [**sun-moon-platform-core**](https://github.com/schware/sun-moon-platform-core)
-is the kernel both services are built on and arrives here as the `core/`
-submodule; [**sun-moon-platform-bo**](https://github.com/schware/sun-moon-platform-bo)
-is Back Office, which used to live in this process. Clone accordingly:
+was split out of this repository (`docs/adr/0014`) — the listener binding,
+REST routing and off-event-loop execution contract — and arrives here as
+the `core/` submodule. Clone accordingly:
 
 ```bash
-git clone --recurse-submodules https://github.com/schware/sun-moon-java-platform.git
+git clone --recurse-submodules -b master https://github.com/schware/sun-moon-java-platform.git
 ```
+
+**Back Office is no longer here.** It used to be `/bo/*` routes in this
+process, then briefly its own Netty service; it is now
+[sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo),
+a Spring service in the `main` branch's family — BO is administration with
+no throughput requirement, and hand-writing session auth for it bought
+nothing (`docs/adr/0015`). The Netty implementation is archived as
+[sun-moon-platform-bo-netty](https://github.com/schware/sun-moon-platform-bo-netty).
 
 📐 **[`docs/DESIGN.md`](docs/DESIGN.md)** ([한국어](docs/DESIGN_kr.md)) — the
 as-built design: runtime topology, layering, batch engine, data model, and

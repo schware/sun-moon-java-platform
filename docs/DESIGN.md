@@ -140,16 +140,25 @@ TCP → HttpServerCodec → HttpObjectAggregator → [WebSocketServerProtocolHan
 ## 6. Back Office — moved
 
 Back Office lives in
-[**sun-moon-platform-bo**](https://github.com/schware/sun-moon-platform-bo)
+[**sun-moon-java-platform-bo**](https://github.com/schware/sun-moon-java-platform-bo)
 now, with its own design document. It was three route groups in this
 process until the port scheme made one-container-per-service the shape,
 and BO's internal-only exposure stopped fitting alongside a device-facing
 API (ADR-0014).
 
 What went with it: the operator/commoncode/device domains, session auth
-and the `AuthorizedEndpoint` permission decorator, their MyBatis adapters,
-and migrations V2-V4 (renumbered V1-V3 there). Both services are built on
-the same kernel, which arrives in each as the `core/` submodule.
+and the `AuthorizedEndpoint` permission decorator, and migrations V2-V4.
+
+**It then went further.** BO briefly ran as its own Netty service on this
+kernel; it is now a **Spring** service in the `main` branch's family, and
+the Netty implementation is archived as
+[sun-moon-platform-bo-netty](https://github.com/schware/sun-moon-platform-bo-netty).
+BO is administration with no throughput requirement, so hand-writing
+sessions, BCrypt and per-action authorization bought it nothing that
+`spring-boot-starter-security` does not already provide (ADR-0015). The
+permission model itself — three tiers, `create` and `save` distinct —
+survived the rewrite unchanged; §6 of the old design still describes it
+accurately, it just lives elsewhere now.
 
 ## 7. Batch
 
@@ -290,6 +299,7 @@ Ordered by what would bite first in production.
 | [0012](adr/0012-deploy-to-own-debian-server.md) | Deploy to the owner's Debian server instead |
 | [0013](adr/0013-withdraw-port-8084.md) | Withdraw port 8084; the family-wide port scheme |
 | [0014](adr/0014-split-the-kernel-from-the-domains-built-on-it.md) | Split the kernel out; BO becomes its own repository |
+| [0015](adr/0015-bo-returns-to-spring-and-leaves-this-lineage.md) | BO leaves for Spring; the Netty implementation is archived |
 
 The deployment runbook is [`DEPLOYMENT.md`](DEPLOYMENT.md).
 

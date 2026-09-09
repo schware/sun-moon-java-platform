@@ -1,6 +1,9 @@
 # ADR-0014: Split the kernel from the domains built on it — three repositories, one container each
 
-- **Status**: Accepted — answers the question ADR-0013 left open, and narrows ADR-0002's single-runtime premise
+- **Status**: Accepted, but its **BO half is superseded by ADR-0015** —
+  BO left this lineage for the Spring family the same day, so the kernel
+  now has one consumer rather than two. The kernel extraction itself and
+  everything below about the boundary still stand.
 - **Date**: 2026-09-09
 - **Deciders**: Project owner
 
