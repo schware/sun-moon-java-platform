@@ -50,13 +50,22 @@ sudo -u postgres createdb -O sunmoon platform_service
 That's it — no schema work. Flyway creates every table on first boot with
 a database configured (`V1`-`V4`).
 
-**1b. Open the firewall** (UFW is active; without this the ports answer
-only on the server itself):
+**1b. Open the firewall** — BO and the API are exposed differently, on
+purpose. The server is reachable from the internet (the landing page links
+a public IP), and BO is a plain-HTTP admin console with a session cookie
+that has no `Secure` flag, so it must **not** be publicly reachable:
 
 ```bash
-sudo ufw allow 8083/tcp && sudo ufw allow <BO_PORT>/tcp && sudo ufw allow 9090/tcp
+sudo ufw allow 8083/tcp                                          # Order API — public, as before
+sudo ufw allow from 192.168.0.0/24 to any port 8080 proto tcp    # BO — LAN only
 sudo ufw status numbered
 ```
+
+⚠️ This only holds while containers run with `--network host`. Docker
+manipulates iptables directly for `-p` published ports and **bypasses UFW**,
+so a BO container switched to `-p 8080:8080` would be internet-reachable
+despite the rule above. Revisit when TLS exists (then `COOKIE_SECURE=true`
+and BO can be published).
 
 ## Step 2 — clone and build (no sudo)
 

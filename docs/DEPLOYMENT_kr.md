@@ -49,13 +49,22 @@ sudo -u postgres createdb -O sunmoon platform_service
 이게 전부입니다 — 테이블은 만들 필요 없습니다. DB만 있으면 첫 기동 때
 Flyway가 `V1`~`V4`를 전부 생성합니다.
 
-**1b. 방화벽 개방** (UFW가 켜져 있어서, 이걸 안 하면 서버 안에서만
-응답합니다):
+**1b. 방화벽 개방** — BO와 API는 **의도적으로 노출 범위가 다릅니다.**
+이 서버는 인터넷에서 접근 가능하고(랜딩 페이지가 공인 IP로 링크합니다),
+BO는 `Secure` 없는 session cookie를 쓰는 평문 HTTP 관리자 콘솔이라
+**공개되면 안 됩니다**:
 
 ```bash
-sudo ufw allow 8083/tcp && sudo ufw allow <BO_PORT>/tcp && sudo ufw allow 9090/tcp
+sudo ufw allow 8083/tcp                                          # Order API — 기존처럼 공개
+sudo ufw allow from 192.168.0.0/24 to any port 8080 proto tcp    # BO — LAN 전용
 sudo ufw status numbered
 ```
+
+⚠️ 이건 컨테이너를 `--network host`로 띄울 때만 성립합니다. Docker는 `-p`로
+포트를 게시하면 iptables를 직접 건드려 **UFW를 우회**하므로, BO를
+`-p 8080:8080`으로 바꾸면 위 규칙에도 불구하고 인터넷에서 접근됩니다.
+TLS가 붙으면 다시 판단합니다(그때 `COOKIE_SECURE=true`로 바꾸고 BO를
+공개할 수 있습니다).
 
 ## 2단계 — clone과 빌드 (sudo 불필요)
 
