@@ -7,6 +7,7 @@ import com.sunmoon.platform.domain.terminal.TerminalType;
 import com.sunmoon.platform.infrastructure.order.OrderClient;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.redisson.api.RTopic;
+import org.redisson.client.codec.StringCodec;
 import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,7 +44,19 @@ public final class OrderEventSubscriber {
     }
 
     public void start() {
-        RTopic topic = redisson.getTopic(CHANNEL);
+        // StringCodec, per topic rather than globally.
+        //
+        // Order publishes with Spring's StringRedisTemplate — plain UTF-8
+        // JSON. Redisson's default codec is Kryo, so it tried to
+        // Kryo-decode that and died on "unregistered class ID", every
+        // message, with a stack trace that named neither service. Two
+        // services agreeing on a channel name is not the same as agreeing
+        // on a wire format.
+        //
+        // Scoped to this topic because the same client also backs the cache
+        // adapter, and changing the codec globally would silently change
+        // how that stores everything.
+        RTopic topic = redisson.getTopic(CHANNEL, StringCodec.INSTANCE);
         topic.addListener(String.class, (channel, message) -> onEvent(message));
         log.info("subscribed to Redis channel '{}'", CHANNEL);
     }
