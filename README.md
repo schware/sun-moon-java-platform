@@ -8,7 +8,10 @@ deliberately **Spring-free**.
 [**sun-moon-platform-core**](https://github.com/schware/sun-moon-platform-core)
 was split out of this repository (`docs/adr/0014`) — the listener binding,
 REST routing and off-event-loop execution contract — and arrives here as
-the `core/` submodule. Clone accordingly:
+the `core/` submodule. It is **archived (read-only)** now that this
+runtime is its only consumer: it still clones and still builds, but
+changing it means unarchiving it first (`docs/adr/0015`). Clone
+accordingly:
 
 ```bash
 git clone --recurse-submodules -b master https://github.com/schware/sun-moon-java-platform.git
