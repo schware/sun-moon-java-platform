@@ -70,25 +70,19 @@ ADR-0002 stands for this repository.
 
 ## Consequences
 
-- **ADR-0014's kernel now has one consumer, and is archived.**
-  `sun-moon-platform-core` was extracted so BO and this runtime could
-  share it without depending on each other; with BO gone, only this
-  runtime remains, so the repository is now **read-only on GitHub**
-  (2026-09-09, at the owner's instruction).
+- **ADR-0014's kernel now has one consumer.** `sun-moon-platform-core` was
+  extracted so BO and this runtime could share it without depending on
+  each other; with BO gone, only this runtime remains. It was briefly
+  archived on 2026-09-09 and unarchived the same day — it stays a normal,
+  writable, public repository.
 
-  This freezes the kernel without dissolving it. The `core/` submodule
-  still clones and still builds — archiving blocks pushes, not reads — so
-  nothing about building or deploying this runtime changes. What it costs
-  is that **changing the kernel now needs the repository unarchived
-  first**, which is a deliberate speed bump on a boundary that is supposed
-  to hold still: endpoints never run on an event-loop thread, and the
-  kernel imports nothing downward. Those two rules are worth keeping even
-  at one consumer.
-
-  The alternative — folding the 15 classes back into this repository and
-  deleting the submodule — was not taken. It would undo ADR-0014's
-  verified boundary work to save a `--recurse-submodules`, and it remains
-  available if a kernel change is ever actually needed.
+  Whether a kernel with a single consumer still deserves a separate
+  repository is a fair question, and deliberately left open rather than
+  answered by reflex — the boundary it enforces (endpoints never run on an
+  event-loop thread, the kernel imports nothing downward) has value
+  independent of how many repositories hold it. Folding the 15 classes
+  back in remains available, and would undo ADR-0014's verified boundary
+  work to save one clone flag.
 - **The portfolio claim changes and should be stated as it is.** The
   hand-built version demonstrated understanding the mechanisms; it still
   exists, archived, with its reasoning intact. What this decision
