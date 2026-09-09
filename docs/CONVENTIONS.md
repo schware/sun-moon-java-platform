@@ -108,8 +108,9 @@ JSON. Any future service that grows a UI will hit this the same way.
 
 ```bash
 for s in $SERVICES; do
-  printf '%-9s frontend=%s api-prefix=%s
-' "$s"     "$( [ -d $s/frontend ] && echo yes || echo no )"     "$(grep -ho 'RequestMapping("[^"]*")' $s/src/main/java/com/sunmoon/*/transport/http/*Controller.java 2>/dev/null | head -1 | cut -d'"' -f2)"
+  frontend=$( [ -d $s/frontend ] && echo yes || echo no )
+  prefix=$(grep -rho 'RequestMapping("[^"]*")' $s/src/main/java --include='*Controller.java' | head -1 | cut -d'"' -f2)
+  echo "$s  frontend=$frontend  first-mapping=$prefix"
 done
 ```
 
