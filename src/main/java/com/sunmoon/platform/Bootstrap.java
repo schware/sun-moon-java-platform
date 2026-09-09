@@ -4,6 +4,7 @@ import com.sunmoon.platform.batch.BatchScheduler;
 import com.sunmoon.platform.batch.OrderSummaryBatchJob;
 import com.sunmoon.platform.batch.OrderSummaryReport;
 import com.sunmoon.platform.core.CoreRuntime;
+import com.sunmoon.platform.core.ListenerSpec;
 import com.sunmoon.platform.core.RuntimeConfig;
 import com.sunmoon.platform.domain.commoncode.CommonCodeRepository;
 import com.sunmoon.platform.domain.device.DeviceRepository;
@@ -22,14 +23,18 @@ import com.sunmoon.platform.infrastructure.persistence.InMemoryDeviceRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOrderRepository;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisCommonCodeRepository;
+import com.sunmoon.platform.infrastructure.persistence.CommonCodeMapper;
+import com.sunmoon.platform.infrastructure.persistence.DeviceMapper;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisConfig;
+import com.sunmoon.platform.infrastructure.persistence.OperatorMapper;
+import com.sunmoon.platform.infrastructure.persistence.OrderMapper;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisDeviceRepository;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisOperatorRepository;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisOrderRepository;
 import com.sunmoon.platform.infrastructure.persistence.PostgresConnectionSettings;
 import com.sunmoon.platform.transport.http.CreateOrderEndpoint;
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
-import com.sunmoon.platform.transport.http.HttpListenerSpec;
+import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.MetricsEndpoint;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -45,6 +50,8 @@ import com.sunmoon.platform.transport.http.bo.device.CreateDeviceEndpoint;
 import com.sunmoon.platform.transport.http.bo.device.DeleteDeviceEndpoint;
 import com.sunmoon.platform.transport.http.bo.device.ListDeviceEndpoint;
 import com.sunmoon.platform.transport.http.bo.device.SaveDeviceEndpoint;
+import com.sunmoon.platform.transport.socket.SocketServerInitializer;
+import com.sunmoon.platform.transport.ws.WsEchoHandler;
 import io.netty.handler.codec.http.HttpMethod;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.slf4j.Logger;
@@ -53,6 +60,8 @@ import org.slf4j.LoggerFactory;
 import javax.sql.DataSource;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * Composition root. No DI container (Spring dropped — see docs/adr/0002):
@@ -75,13 +84,22 @@ public final class Bootstrap {
 
         seedSuperAdminIfNeeded(repositories.operators());
 
-        List<HttpListenerSpec> listeners = List.of(
-                new HttpListenerSpec("BO", config.boPort(), boRoutes(repositories, sessionStore, config), false),
-                new HttpListenerSpec("Order API", config.apiPort(), apiRoutes(eventPublisher), true));
+        // The composition root owns the worker pool endpoints run on (docs/adr/0010),
+        // so the kernel doesn't have to know it exists.
+        ExecutorService blockingWorkExecutor = Executors.newFixedThreadPool(
+                config.workerThreads(), Thread.ofPlatform().name("platform-worker-", 0).daemon(true).factory());
+        log.info("{} worker threads for blocking endpoint work", config.workerThreads());
+
+        List<ListenerSpec> listeners = List.of(
+                new ListenerSpec("BO", config.boPort(), new HttpServerInitializer(
+                        boRoutes(repositories, sessionStore, config), null, blockingWorkExecutor)),
+                new ListenerSpec("Order API", config.apiPort(), new HttpServerInitializer(
+                        apiRoutes(eventPublisher), WsEchoHandler::new, blockingWorkExecutor)),
+                new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(repositories.orders());
 
-        new CoreRuntime(listeners, config.socketPort(), config.workerThreads()).start();
+        new CoreRuntime(listeners).start();
     }
 
     private record Repositories(
@@ -114,7 +132,8 @@ public final class Bootstrap {
         PostgresConnectionSettings settings = PostgresConnectionSettings.fromEnv();
         DataSource dataSource = MyBatisConfig.buildDataSource(settings);
         FlywayMigrator.migrate(dataSource);
-        SqlSessionFactory sqlSessionFactory = MyBatisConfig.buildSqlSessionFactory(dataSource);
+        SqlSessionFactory sqlSessionFactory = MyBatisConfig.buildSqlSessionFactory(dataSource,
+                OrderMapper.class, OperatorMapper.class, CommonCodeMapper.class, DeviceMapper.class);
         log.info("POSTGRES_JDBC_URL set — using PostgreSQL repositories ({})", settings.jdbcUrl());
         return new Repositories(
                 new MyBatisOrderRepository(sqlSessionFactory),

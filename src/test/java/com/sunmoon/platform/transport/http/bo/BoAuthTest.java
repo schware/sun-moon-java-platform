@@ -8,7 +8,8 @@ import com.sunmoon.platform.infrastructure.auth.InMemorySessionStore;
 import com.sunmoon.platform.infrastructure.auth.PasswordHasher;
 import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
-import com.sunmoon.platform.transport.http.HttpListenerSpec;
+import com.sunmoon.platform.core.ListenerSpec;
+import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -58,8 +59,8 @@ class BoAuthTest {
                 new AuthorizedEndpoint(Screen.COMMON_CODE, Action.VIEW, sessionStore, protectedEndpoint)
         );
 
-        CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-bo", HTTP_PORT, routes, false)), SOCKET_PORT, 4);
+        CoreRuntime runtime = new CoreRuntime(List.of(new ListenerSpec("test-bo", HTTP_PORT, new HttpServerInitializer(
+                        routes, null, java.util.concurrent.Executors.newFixedThreadPool(4)))));
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

@@ -1,6 +1,7 @@
 package com.sunmoon.platform.transport.http;
 
 import com.sunmoon.platform.core.CoreRuntime;
+import com.sunmoon.platform.core.ListenerSpec;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import org.junit.jupiter.api.BeforeAll;
@@ -16,6 +17,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -63,8 +65,10 @@ class BlockingWorkOffloadTest {
                 new RouteKey(HttpMethod.GET, "/slow"), slowEndpoint,
                 new RouteKey(HttpMethod.GET, "/boom"), boomEndpoint);
 
-        CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-offload", HTTP_PORT, routes, false)), SOCKET_PORT, WORKER_THREADS);
+        CoreRuntime runtime = new CoreRuntime(List.of(
+                new ListenerSpec("test-offload", HTTP_PORT, new HttpServerInitializer(
+                        routes, null, Executors.newFixedThreadPool(WORKER_THREADS,
+                                Thread.ofPlatform().name("platform-worker-", 0).daemon(true).factory())))));
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

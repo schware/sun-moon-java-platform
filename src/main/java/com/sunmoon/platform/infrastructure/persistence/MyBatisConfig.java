@@ -28,13 +28,13 @@ public final class MyBatisConfig {
         return new HikariDataSource(hikariConfig);
     }
 
-    public static SqlSessionFactory buildSqlSessionFactory(DataSource dataSource) {
+    /** Mappers are passed in rather than listed here: the kernel must not know which domains exist (docs/adr/0014). */
+    public static SqlSessionFactory buildSqlSessionFactory(DataSource dataSource, Class<?>... mappers) {
         Environment environment = new Environment("postgres", new JdbcTransactionFactory(), dataSource);
         Configuration configuration = new Configuration(environment);
-        configuration.addMapper(OrderMapper.class);
-        configuration.addMapper(OperatorMapper.class);
-        configuration.addMapper(CommonCodeMapper.class);
-        configuration.addMapper(DeviceMapper.class);
+        for (Class<?> mapper : mappers) {
+            configuration.addMapper(mapper);
+        }
         return new SqlSessionFactoryBuilder().build(configuration);
     }
 

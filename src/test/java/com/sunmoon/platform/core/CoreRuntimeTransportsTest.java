@@ -1,7 +1,10 @@
 package com.sunmoon.platform.core;
 
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
-import com.sunmoon.platform.transport.http.HttpListenerSpec;
+import com.sunmoon.platform.core.ListenerSpec;
+import com.sunmoon.platform.transport.socket.SocketServerInitializer;
+import com.sunmoon.platform.transport.ws.WsEchoHandler;
+import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.RouteKey;
 import io.netty.handler.codec.http.HttpMethod;
 import org.junit.jupiter.api.AfterAll;
@@ -22,6 +25,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executors;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -43,10 +47,11 @@ class CoreRuntimeTransportsTest {
 
     @BeforeAll
     static void startRuntime() throws InterruptedException {
-        CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test", HTTP_PORT,
-                        Map.of(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()), true)),
-                SOCKET_PORT, 4);
+        CoreRuntime runtime = new CoreRuntime(List.of(
+                new ListenerSpec("test-http", HTTP_PORT, new HttpServerInitializer(
+                        Map.of(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
+                        WsEchoHandler::new, Executors.newFixedThreadPool(4))),
+                new ListenerSpec("test-socket", SOCKET_PORT, new SocketServerInitializer())));
         runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

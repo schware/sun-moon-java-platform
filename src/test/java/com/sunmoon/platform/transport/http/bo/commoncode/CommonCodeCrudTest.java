@@ -11,7 +11,8 @@ import com.sunmoon.platform.infrastructure.auth.PasswordHasher;
 import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryCommonCodeRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
-import com.sunmoon.platform.transport.http.HttpListenerSpec;
+import com.sunmoon.platform.core.ListenerSpec;
+import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
 import com.sunmoon.platform.transport.http.bo.AuthorizedEndpoint;
@@ -63,8 +64,8 @@ class CommonCodeCrudTest {
                 new AuthorizedEndpoint(Screen.COMMON_CODE, Action.DELETE, sessionStore, new DeleteCommonCodeEndpoint(commonCodeRepository))
         );
 
-        CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-common-code", HTTP_PORT, routes, false)), SOCKET_PORT, 4);
+        CoreRuntime runtime = new CoreRuntime(List.of(new ListenerSpec("test-common-code", HTTP_PORT, new HttpServerInitializer(
+                        routes, null, java.util.concurrent.Executors.newFixedThreadPool(4)))));
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();

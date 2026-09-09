@@ -11,7 +11,8 @@ import com.sunmoon.platform.infrastructure.auth.PasswordHasher;
 import com.sunmoon.platform.infrastructure.auth.SessionStore;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryDeviceRepository;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOperatorRepository;
-import com.sunmoon.platform.transport.http.HttpListenerSpec;
+import com.sunmoon.platform.core.ListenerSpec;
+import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
 import com.sunmoon.platform.transport.http.bo.AuthorizedEndpoint;
@@ -64,8 +65,8 @@ class DeviceCrudTest {
                 new RouteKey(HttpMethod.DELETE, "/bo/devices"),
                 new AuthorizedEndpoint(Screen.DEVICE, Action.DELETE, sessionStore, new DeleteDeviceEndpoint(deviceRepository)));
 
-        CoreRuntime runtime = new CoreRuntime(
-                List.of(new HttpListenerSpec("test-device", HTTP_PORT, routes, false)), SOCKET_PORT, 4);
+        CoreRuntime runtime = new CoreRuntime(List.of(new ListenerSpec("test-device", HTTP_PORT, new HttpServerInitializer(
+                        routes, null, java.util.concurrent.Executors.newFixedThreadPool(4)))));
         Thread runtimeThread = new Thread(() -> {
             try {
                 runtime.start();
