@@ -7,3 +7,6 @@
 [submodule "delivery"]
 	path = delivery
 	url = https://github.com/schware/sun-moon-java-platform-delivery.git
+[submodule "bo"]
+	path = bo
+	url = https://github.com/schware/sun-moon-java-platform-bo.git
