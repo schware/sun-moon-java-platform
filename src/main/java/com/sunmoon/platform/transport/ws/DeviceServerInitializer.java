@@ -10,6 +10,8 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.cors.CorsConfigBuilder;
+import io.netty.handler.codec.http.cors.CorsHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolConfig;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 
@@ -66,6 +68,16 @@ public final class DeviceServerInitializer extends ChannelInitializer<SocketChan
                         .checkStartsWith(true)
                         .build()));
         pipeline.addLast(new TerminalFrameHandler(registry));
+        // The terminal apps are separate repositories served from the :8000
+        // hub, so their pages are a different origin from this API and every
+        // fetch would otherwise be blocked. Credentials are not allowed
+        // because terminals authenticate by device id at the handshake, not
+        // by cookie — so there is nothing here worth sending them for.
+        pipeline.addLast(new CorsHandler(CorsConfigBuilder.forAnyOrigin()
+                .allowedRequestMethods(io.netty.handler.codec.http.HttpMethod.GET,
+                        io.netty.handler.codec.http.HttpMethod.POST)
+                .allowedRequestHeaders("content-type")
+                .build()));
         pipeline.addLast(new RestRequestRouter(routes, blockingWorkExecutor));
     }
 }

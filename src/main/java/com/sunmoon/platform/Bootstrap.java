@@ -1,6 +1,7 @@
 package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.CreateOrderEndpoint;
+import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
 import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
 import com.sunmoon.platform.domain.terminal.DeviceDirectory;
@@ -13,6 +14,9 @@ import com.sunmoon.platform.core.ListenerSpec;
 import com.sunmoon.platform.domain.order.OrderRepository;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
+import com.sunmoon.platform.infrastructure.messaging.OrderEventSubscriber;
+import com.sunmoon.platform.infrastructure.order.OrderClient;
+import com.sunmoon.platform.infrastructure.cache.RedissonClientFactory;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOrderRepository;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisOrderRepository;
 import com.sunmoon.platform.infrastructure.persistence.OrderMapper;
@@ -69,9 +73,13 @@ public final class Bootstrap {
         TerminalRegistry terminals = new TerminalRegistry();
         DeviceDirectory directory = new AcceptKnownFormatDirectory();
 
+        OrderClient orderClient = new OrderClient(config.orderServiceUrl());
+        subscribeToOrderEvents(config, terminals, orderClient);
+
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
-                        apiRoutes(eventPublisher, terminals), blockingWorkExecutor, directory, terminals)),
+                        apiRoutes(eventPublisher, terminals, orderClient),
+                        blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(orders);
@@ -106,15 +114,53 @@ public final class Bootstrap {
      * going to own orders, kept only until the flow proves out against the
      * Spring Order service on 8083.
      */
-    private static Map<RouteKey, RestEndpoint> apiRoutes(EventPublisher eventPublisher, TerminalRegistry terminals) {
-        TerminalEndpoints endpoints = new TerminalEndpoints(terminals);
-        return Map.of(
-                new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint(),
-                new RouteKey(HttpMethod.GET, "/metrics"), new MetricsEndpoint(),
-                new RouteKey(HttpMethod.GET, "/terminals"), endpoints.list(),
-                new RouteKey(HttpMethod.POST, "/terminals/push"), endpoints.pushToDevice(),
-                new RouteKey(HttpMethod.POST, "/terminals/broadcast"), endpoints.broadcastToType(),
-                new RouteKey(HttpMethod.POST, "/orders"), new CreateOrderEndpoint(eventPublisher));
+    private static Map<RouteKey, RestEndpoint> apiRoutes(
+            EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient) {
+
+        TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
+        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
+
+        return Map.ofEntries(
+                Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/metrics"), new MetricsEndpoint()),
+
+                Map.entry(new RouteKey(HttpMethod.GET, "/terminals"), terminalEndpoints.list()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/terminals/push"), terminalEndpoints.pushToDevice()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/terminals/broadcast"), terminalEndpoints.broadcastToType()),
+
+                // The terminals' view of Order, on this server's own origin.
+                Map.entry(new RouteKey(HttpMethod.GET, "/orders"), orderEndpoints.list()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/status"), orderEndpoints.changeStatus()),
+
+                // Left from when this runtime was going to own orders; it
+                // writes to nothing now and goes when the flow is proven.
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/legacy"), new CreateOrderEndpoint(eventPublisher)));
+    }
+
+    /**
+     * Subscribes to Order's events, when there is a Redis to subscribe to.
+     *
+     * <p>Absent {@code REDIS_URL} the server still runs: terminals connect
+     * and can still fetch orders, they simply are not nudged. That keeps a
+     * machine with only a JDK runnable, the same bargain as the fake
+     * repositories (docs/adr/0003).
+     */
+    private static void subscribeToOrderEvents(
+            PlatformConfig config, TerminalRegistry terminals, OrderClient orderClient) {
+
+        if (config.redisUrl() == null) {
+            log.info("REDIS_URL not set — terminals will not be pushed order events");
+            return;
+        }
+        try {
+            new OrderEventSubscriber(
+                    RedissonClientFactory.create(config.redisUrl()), terminals, orderClient).start();
+        } catch (RuntimeException e) {
+            // Loud, but not fatal: the terminals are still usable by polling,
+            // and a Device Server that refuses to start because Redis is
+            // down would take the screens with it.
+            log.error("could not subscribe to order events — terminals will not be nudged", e);
+        }
     }
 
     private static void runStartupBatchJob(OrderRepository orderRepository) throws Exception {

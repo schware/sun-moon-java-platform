@@ -13,11 +13,16 @@ public final class PlatformConfig {
     private final int apiPort;
     private final int socketPort;
     private final int workerThreads;
+    private final String orderServiceUrl;
+    private final String redisUrl;
 
-    private PlatformConfig(int apiPort, int socketPort, int workerThreads) {
+    private PlatformConfig(int apiPort, int socketPort, int workerThreads,
+                           String orderServiceUrl, String redisUrl) {
         this.apiPort = apiPort;
         this.socketPort = socketPort;
         this.workerThreads = workerThreads;
+        this.orderServiceUrl = orderServiceUrl;
+        this.redisUrl = redisUrl;
     }
 
     public static PlatformConfig fromEnv() {
@@ -26,7 +31,9 @@ public final class PlatformConfig {
                 Integer.parseInt(env.getOrDefault("API_PORT", env.getOrDefault("PORT", "8087"))),
                 Integer.parseInt(env.getOrDefault("SOCKET_PORT", "9011")),
                 Integer.parseInt(env.getOrDefault("WORKER_THREADS",
-                        String.valueOf(Runtime.getRuntime().availableProcessors() * 4))));
+                        String.valueOf(Runtime.getRuntime().availableProcessors() * 4))),
+                env.getOrDefault("ORDER_SERVICE_URL", "http://localhost:8083/order"),
+                env.get("REDIS_URL"));
     }
 
     public int apiPort() {
@@ -45,5 +52,19 @@ public final class PlatformConfig {
      */
     public int workerThreads() {
         return workerThreads;
+    }
+
+    /** Where the Spring Order service listens, context-path included. */
+    public String orderServiceUrl() {
+        return orderServiceUrl;
+    }
+
+    /**
+     * {@code redis://host:port}. Absent means no subscription — terminals
+     * still connect and can still fetch orders, they just are not nudged.
+     * A machine with only a JDK stays runnable.
+     */
+    public String redisUrl() {
+        return redisUrl;
     }
 }
