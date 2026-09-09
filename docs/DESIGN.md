@@ -235,8 +235,9 @@ Connection settings come from `POSTGRES_JDBC_URL` / `POSTGRES_USER` /
 
 ## 11. Testing strategy
 
-11 tests here, all passing, in two styles — 26 across the three
-repositories (12 in BO, 3 in the kernel).
+11 tests here, all passing, in two styles — 14 with the kernel's 3.
+(The BO tests that used to be counted alongside these left with BO when it
+became a Spring service, ADR-0015.)
 
 - **Live HTTP tests.** `CoreRuntimeTransportsTest` starts the real
   `CoreRuntime` on test ports and drives it with real clients —

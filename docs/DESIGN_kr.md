@@ -228,8 +228,9 @@ BO의 migration은 BO와 함께 나갔고 그쪽에서 V1부터 번호가 다시
 
 ## 11. 테스트 전략
 
-여기 11개가 모두 통과하며, 두 가지 방식이다 — 세 저장소를 합치면 26개다
-(BO 12개, kernel 3개).
+여기 11개가 모두 통과하며, 두 가지 방식이다 — kernel의 3개를 더하면 14개다.
+(여기 함께 세던 BO 테스트는 BO가 Spring service가 되면서 같이 나갔다,
+ADR-0015.)
 
 - **라이브 HTTP 테스트.** `CoreRuntimeTransportsTest`는 실제
   `CoreRuntime`을 테스트 port로 띄우고 진짜 client로 두드린다 —
