@@ -11,6 +11,8 @@ import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+
 /**
  * Listens to Order's {@code order-events} channel and turns each event
  * into a push to the terminals that care about it.
@@ -29,12 +31,15 @@ public final class OrderEventSubscriber {
     private final RedissonClient redisson;
     private final TerminalRegistry registry;
     private final OrderClient orders;
+    private final Duration terminalGrace;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public OrderEventSubscriber(RedissonClient redisson, TerminalRegistry registry, OrderClient orders) {
+    public OrderEventSubscriber(RedissonClient redisson, TerminalRegistry registry,
+                                OrderClient orders, Duration terminalGrace) {
         this.redisson = redisson;
         this.registry = registry;
         this.orders = orders;
+        this.terminalGrace = terminalGrace;
     }
 
     public void start() {
@@ -62,7 +67,18 @@ public final class OrderEventSubscriber {
             // store is not asked to answer for a screen that was switched
             // off. Only PLACED — every later state is informational, and a
             // paid order must not be undone because a display is offline.
+            //
+            // But a terminal that was here moments ago is probably
+            // reconnecting, not gone. Within the grace period the order is
+            // left PLACED and the terminal picks it up when it comes back,
+            // because it fetches the list rather than replaying frames. A
+            // dropped wifi should cost a delay, not a customer.
             if (reached == 0 && "PLACED".equals(status)) {
+                if (registry.isPresentOrRecentlySeen(audience, terminalGrace)) {
+                    log.info("order {} left PLACED: no {} terminal connected, but one was seen within {}",
+                            orderId, audience, terminalGrace);
+                    return;
+                }
                 rejectUnattended(orderId);
                 return;
             }

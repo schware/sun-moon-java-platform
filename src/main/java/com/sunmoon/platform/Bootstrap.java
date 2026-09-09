@@ -154,7 +154,8 @@ public final class Bootstrap {
         }
         try {
             new OrderEventSubscriber(
-                    RedissonClientFactory.create(config.redisUrl()), terminals, orderClient).start();
+                    RedissonClientFactory.create(config.redisUrl()), terminals, orderClient,
+                    config.terminalGrace()).start();
         } catch (RuntimeException e) {
             // Loud, but not fatal: the terminals are still usable by polling,
             // and a Device Server that refuses to start because Redis is

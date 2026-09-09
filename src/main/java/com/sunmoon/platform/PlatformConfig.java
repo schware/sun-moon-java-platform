@@ -1,5 +1,7 @@
 package com.sunmoon.platform;
 
+import java.time.Duration;
+
 /**
  * This runtime's configuration. Two listeners, so two ports: the REST/
  * WebSocket API and the raw Socket transport. BO's port is not here — BO
@@ -15,14 +17,16 @@ public final class PlatformConfig {
     private final int workerThreads;
     private final String orderServiceUrl;
     private final String redisUrl;
+    private final Duration terminalGrace;
 
     private PlatformConfig(int apiPort, int socketPort, int workerThreads,
-                           String orderServiceUrl, String redisUrl) {
+                           String orderServiceUrl, String redisUrl, Duration terminalGrace) {
         this.apiPort = apiPort;
         this.socketPort = socketPort;
         this.workerThreads = workerThreads;
         this.orderServiceUrl = orderServiceUrl;
         this.redisUrl = redisUrl;
+        this.terminalGrace = terminalGrace;
     }
 
     public static PlatformConfig fromEnv() {
@@ -33,7 +37,8 @@ public final class PlatformConfig {
                 Integer.parseInt(env.getOrDefault("WORKER_THREADS",
                         String.valueOf(Runtime.getRuntime().availableProcessors() * 4))),
                 env.getOrDefault("ORDER_SERVICE_URL", "http://localhost:8083/order"),
-                env.get("REDIS_URL"));
+                env.get("REDIS_URL"),
+                Duration.parse(env.getOrDefault("TERMINAL_GRACE", "PT3M")));
     }
 
     public int apiPort() {
@@ -66,5 +71,18 @@ public final class PlatformConfig {
      */
     public String redisUrl() {
         return redisUrl;
+    }
+
+    /**
+     * How long after a terminal disconnects its shop still counts as
+     * staffed. Inside this window a placed order waits instead of being
+     * refused, because a screen that just dropped is usually reconnecting.
+     *
+     * <p>Worth keeping below Order's acceptance timeout: past that the
+     * order expires anyway, and a grace period longer than it would only
+     * change which of the two endings the customer is told about.
+     */
+    public Duration terminalGrace() {
+        return terminalGrace;
     }
 }
