@@ -114,6 +114,32 @@ for s in $SERVICES; do
 done
 ```
 
+### channel-order — a fifth service, deliberately unlike the four above
+
+`channel-order` (the 주문 채널 / order-placing screen) is not in `$SERVICES`
+above and should not be added to those loops: it fails several of those
+checks on purpose, not by drift.
+
+| | channel-order | the four above |
+|---|---|---|
+| Auth | none | BO has sessions; the others accept unauthenticated orders too, but channel-order additionally has no admin surface at all |
+| Persistence | none — catalog is a fixed list in code | Postgres, one DB per service |
+| `frontend/` | Vite + React + TypeScript, no router — two screens reached by React state, never by URL | only BO has one, and BO uses `react-router-dom` |
+| Package layout | no `domain/<aggregate>/Repository` — there is nothing to persist | repository interface + Jdbc impl per aggregate |
+
+Why: it is a public, no-login ordering screen whose only job is to
+validate a (store, menu) pick against a fixed catalog and hand the order
+to Order, which is the system of record. There is nothing here worth a
+database, and no operator identity to authenticate. If this catalog ever
+needs to be edited without a redeploy, that is the trigger to give it a
+database — not before.
+
+It still follows the shared rules that don't depend on having a database
+or a login: same Spring Boot/Jetty/springdoc pins, same `config/` trio
+(`OpenApiConfig`, `MetricsConfig`, `PathRedactor`,
+`RedactedDiskSpaceHealthIndicator`), same two-stage-with-frontend
+Dockerfile pattern as BO, same `@WebMvcTest` testing style.
+
 ---
 
 ## 3. Ports and context-paths — one line each
@@ -132,6 +158,7 @@ done
 | kds | 8081 | `/kds` |
 | delivery | 8082 | `/delivery` |
 | order | 8083 | `/order` |
+| channel-order | 8085 | `/channel-order` |
 
 Ports come from the server-wide scheme, not from this repo — see
 `Debian-Setting`'s `docs/docker.md`. **Order's `application.yml` still
