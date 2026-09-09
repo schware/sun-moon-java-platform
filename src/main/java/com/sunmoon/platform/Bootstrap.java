@@ -1,6 +1,10 @@
 package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.CreateOrderEndpoint;
+import com.sunmoon.platform.api.TerminalEndpoints;
+import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
+import com.sunmoon.platform.domain.terminal.DeviceDirectory;
+import com.sunmoon.platform.domain.terminal.TerminalRegistry;
 import com.sunmoon.platform.batch.BatchScheduler;
 import com.sunmoon.platform.batch.OrderSummaryBatchJob;
 import com.sunmoon.platform.batch.OrderSummaryReport;
@@ -16,12 +20,11 @@ import com.sunmoon.platform.infrastructure.persistence.FlywayMigrator;
 import com.sunmoon.platform.infrastructure.persistence.MyBatisConfig;
 import com.sunmoon.platform.infrastructure.persistence.PostgresConnectionSettings;
 import com.sunmoon.platform.transport.http.HealthCheckEndpoint;
-import com.sunmoon.platform.transport.http.HttpServerInitializer;
 import com.sunmoon.platform.transport.http.MetricsEndpoint;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
 import com.sunmoon.platform.transport.socket.SocketServerInitializer;
-import com.sunmoon.platform.transport.ws.WsEchoHandler;
+import com.sunmoon.platform.transport.ws.DeviceServerInitializer;
 import io.netty.handler.codec.http.HttpMethod;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.slf4j.Logger;
@@ -61,9 +64,14 @@ public final class Bootstrap {
                 config.workerThreads(), Thread.ofPlatform().name("platform-worker-", 0).daemon(true).factory());
         log.info("{} worker threads for blocking endpoint work", config.workerThreads());
 
+        // The Device Server's two halves: terminals hold WebSockets here,
+        // and everything about them is answered over REST on the same port.
+        TerminalRegistry terminals = new TerminalRegistry();
+        DeviceDirectory directory = new AcceptKnownFormatDirectory();
+
         List<ListenerSpec> listeners = List.of(
-                new ListenerSpec("API", config.apiPort(), new HttpServerInitializer(
-                        apiRoutes(eventPublisher), WsEchoHandler::new, blockingWorkExecutor)),
+                new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
+                        apiRoutes(eventPublisher, terminals), blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(orders);
@@ -92,11 +100,20 @@ public final class Bootstrap {
         return new MyBatisOrderRepository(sqlSessionFactory);
     }
 
-    /** The business-facing REST surface, plus the WebSocket transport and the operational endpoints. */
-    private static Map<RouteKey, RestEndpoint> apiRoutes(EventPublisher eventPublisher) {
+    /**
+     * The Device Server's REST surface. The routes that matter are about
+     * terminals; {@code /orders} is a leftover from when this runtime was
+     * going to own orders, kept only until the flow proves out against the
+     * Spring Order service on 8083.
+     */
+    private static Map<RouteKey, RestEndpoint> apiRoutes(EventPublisher eventPublisher, TerminalRegistry terminals) {
+        TerminalEndpoints endpoints = new TerminalEndpoints(terminals);
         return Map.of(
                 new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint(),
                 new RouteKey(HttpMethod.GET, "/metrics"), new MetricsEndpoint(),
+                new RouteKey(HttpMethod.GET, "/terminals"), endpoints.list(),
+                new RouteKey(HttpMethod.POST, "/terminals/push"), endpoints.pushToDevice(),
+                new RouteKey(HttpMethod.POST, "/terminals/broadcast"), endpoints.broadcastToType(),
                 new RouteKey(HttpMethod.POST, "/orders"), new CreateOrderEndpoint(eventPublisher));
     }
 

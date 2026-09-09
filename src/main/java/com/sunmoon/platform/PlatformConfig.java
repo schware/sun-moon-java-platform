@@ -23,7 +23,7 @@ public final class PlatformConfig {
     public static PlatformConfig fromEnv() {
         var env = System.getenv();
         return new PlatformConfig(
-                Integer.parseInt(env.getOrDefault("API_PORT", env.getOrDefault("PORT", "8083"))),
+                Integer.parseInt(env.getOrDefault("API_PORT", env.getOrDefault("PORT", "8087"))),
                 Integer.parseInt(env.getOrDefault("SOCKET_PORT", "9011")),
                 Integer.parseInt(env.getOrDefault("WORKER_THREADS",
                         String.valueOf(Runtime.getRuntime().availableProcessors() * 4))));
