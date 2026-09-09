@@ -2,6 +2,14 @@
 
 # Deployment runbook — the Debian server
 
+> ⚠️ **Paused as of 2026-09-09.** The port assignment below (BO on 8084)
+> was wrong: the server has a port-numbering scheme — **BO 8080, API
+> services 8081-8089, Socket 9090** — and one container binding three of
+> those slots doesn't fit it. The container has been removed from the
+> server; the image and the clone remain. Everything else in this runbook
+> (Dockerfile, env file, database steps, verification) still applies once
+> the ports and the BO/runtime split are settled. See ADR-0013.
+
 Target and rationale: [`adr/0012`](adr/0012-deploy-to-own-debian-server.md).
 Follows the conventions already in use on that server (`Debian-Setting`
 repo, `docs/docker.md`): clone into `~/apps/docker/`, build the image on
@@ -19,7 +27,7 @@ the server, run one container with `--network host`.
 |---|---|
 | 8080 / 8081 / 8082 | Spring Order / KDS / Delivery — **untouched** |
 | **8083** | this platform — Order API (+ WebSocket `/ws`) |
-| **8084** | this platform — BO |
+| **(TBD)** | this platform — BO — 8084 was wrong, see the banner above |
 | **9090** | this platform — Socket |
 
 Only `BO_PORT` is overridden; `API_PORT` and `SOCKET_PORT` already default
@@ -46,7 +54,7 @@ a database configured (`V1`-`V4`).
 only on the server itself):
 
 ```bash
-sudo ufw allow 8083/tcp && sudo ufw allow 8084/tcp && sudo ufw allow 9090/tcp
+sudo ufw allow 8083/tcp && sudo ufw allow <BO_PORT>/tcp && sudo ufw allow 9090/tcp
 sudo ufw status numbered
 ```
 
@@ -74,7 +82,7 @@ so they don't land in shell history or `ps` output:
 
 ```bash
 cat > ~/apps/docker/sun-moon-java-platform-netty/.env <<'EOF'
-BO_PORT=8084
+BO_PORT=<to be decided>
 WORKER_THREADS=8
 COOKIE_SECURE=false
 POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/platform_service
@@ -120,7 +128,7 @@ on restart** — fix that before going further.
 Then, from any machine on the LAN:
 
 ```bash
-BASE=http://192.168.0.2:8084
+BASE=http://192.168.0.2:<BO_PORT>
 
 curl $BASE/health                      # {"status":"UP"}
 curl $BASE/metrics                     # Prometheus text format
@@ -146,7 +154,7 @@ printf 'ping' | nc 192.168.0.2 9090     # Socket echo → "ping"
 The landing page at `:8000` is a static file, edited live with no restart:
 
 ```bash
-vi ~/apps/docker/nginx/html/index.html   # add a card → http://192.168.0.2:8084/health
+vi ~/apps/docker/nginx/html/index.html   # add a card → http://192.168.0.2:<BO_PORT>/health
 ```
 
 ## Redeploying after a code change

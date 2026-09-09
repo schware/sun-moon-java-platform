@@ -76,9 +76,10 @@ Python, C, Java로 증명한다.
 probe할 수 있어야 한다. `/metrics`가 BO 쪽에 있는 건 BO가 운영 표면이기
 때문이다.
 
-위 port는 **코드 기본값**으로 로컬 개발 기준이다. 실제 배포 대상에서는
-이미 돌고 있는 서비스들에 맞춰 재배치된다 — BO는 `BO_PORT`로 8084로
-옮긴다. `DEPLOYMENT.md`와 ADR-0012 참고.
+위 port는 **코드 기본값**이다. 배포 대상에서 어떤 번호를 쓸지는 별개
+문제다 — 서버에는 자체 번호 규칙(BO 8080, API 서비스 8081~8089, Socket
+9090)이 있고, 컨테이너 하나가 그중 셋을 동시에 물는 지금 구조는 그
+규칙과 맞지 않는다. 이 지점에서 배포는 보류 상태다. ADR-0013 참고.
 
 **Threading.** Event-loop thread는 codec과 router만 실행한다.
 `RestEndpoint.handle()`은 **제한된 크기의 worker pool**

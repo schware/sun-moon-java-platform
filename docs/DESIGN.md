@@ -77,9 +77,11 @@ One process. One `NioEventLoopGroup` boss (1 thread) + one worker group
 `/health` is on both HTTP listeners deliberately: each is independently
 probeable. `/metrics` sits on BO because BO is the operational surface.
 
-The ports above are the **code defaults**, used in local development. On
-the deployment target they are remapped around services already running
-there — BO moves to 8084 via `BO_PORT`; see `DEPLOYMENT.md` and ADR-0012.
+The ports above are the **code defaults**. Where they land on a
+deployment target is a separate question — the owner's server has its own
+port-numbering scheme (BO 8080, API services 8081-8089, Socket 9090) that
+does not yet fit a single container binding three of them. Deployment is
+paused on that point; see ADR-0013.
 
 **Threading.** Event-loop threads run the codec and the router only.
 `RestEndpoint.handle()` is dispatched to a **bounded worker pool**

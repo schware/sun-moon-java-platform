@@ -2,6 +2,13 @@
 
 # 배포 절차 — Debian 서버
 
+> ⚠️ **2026-09-09 기준 보류.** 아래의 포트 배정(BO 8084)은 잘못됐습니다.
+> 서버에는 번호 규칙이 있고 — **BO 8080, API 서비스 8081~8089, Socket
+> 9090** — 컨테이너 하나가 그중 세 칸을 물는 구조는 그 규칙과 맞지
+> 않습니다. 컨테이너는 서버에서 제거했고, 이미지와 clone은 남아 있습니다.
+> 나머지 내용(Dockerfile, env 파일, DB 단계, 검증 절차)은 포트와 BO 분리가
+> 정해지면 그대로 유효합니다. ADR-0013 참고.
+
 배포 대상과 근거: [`adr/0012`](adr/0012-deploy-to-own-debian-server.md).
 이미 그 서버에서 쓰고 있는 관례(`Debian-Setting` 저장소 `docs/docker.md`)를
 그대로 따릅니다 — `~/apps/docker/`에 clone, 서버에서 이미지 빌드,
@@ -19,7 +26,7 @@
 |---|---|
 | 8080 / 8081 / 8082 | Spring Order / KDS / Delivery — **건드리지 않음** |
 | **8083** | 이 플랫폼 — Order API (+ WebSocket `/ws`) |
-| **8084** | 이 플랫폼 — BO |
+| **(미정)** | 이 플랫폼 — BO — 8084는 잘못된 배정, 위 안내 참고 |
 | **9090** | 이 플랫폼 — Socket |
 
 `BO_PORT`만 덮어씁니다. `API_PORT`와 `SOCKET_PORT`는 기본값이 이미
@@ -46,7 +53,7 @@ Flyway가 `V1`~`V4`를 전부 생성합니다.
 응답합니다):
 
 ```bash
-sudo ufw allow 8083/tcp && sudo ufw allow 8084/tcp && sudo ufw allow 9090/tcp
+sudo ufw allow 8083/tcp && sudo ufw allow <BO_PORT>/tcp && sudo ufw allow 9090/tcp
 sudo ufw status numbered
 ```
 
@@ -74,7 +81,7 @@ docker build --network host -t sun-moon-netty .
 
 ```bash
 cat > ~/apps/docker/sun-moon-java-platform-netty/.env <<'EOF'
-BO_PORT=8084
+BO_PORT=<정해지면 기입>
 WORKER_THREADS=8
 COOKIE_SECURE=false
 POSTGRES_JDBC_URL=jdbc:postgresql://localhost:5432/platform_service
@@ -120,7 +127,7 @@ DB를 기대했는데 `using in-memory fake repositories`가 나오면 env 파�
 그다음 LAN의 아무 PC에서나:
 
 ```bash
-BASE=http://192.168.0.2:8084
+BASE=http://192.168.0.2:<BO_PORT>
 
 curl $BASE/health                      # {"status":"UP"}
 curl $BASE/metrics                     # Prometheus 텍스트 포맷
@@ -146,7 +153,7 @@ printf 'ping' | nc 192.168.0.2 9090     # Socket echo → "ping"
 `:8000` 랜딩 페이지는 정적 파일이라 재시작 없이 바로 반영됩니다:
 
 ```bash
-vi ~/apps/docker/nginx/html/index.html   # 카드 추가 → http://192.168.0.2:8084/health
+vi ~/apps/docker/nginx/html/index.html   # 카드 추가 → http://192.168.0.2:<BO_PORT>/health
 ```
 
 ## 코드 변경 후 재배포
