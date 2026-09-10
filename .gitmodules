@@ -10,3 +10,6 @@
 [submodule "bo"]
 	path = bo
 	url = https://github.com/schware/sun-moon-java-platform-bo.git
+[submodule "channel-order"]
+	path = channel-order
+	url = https://github.com/schware/sun-moon-java-platform-channel-order.git
