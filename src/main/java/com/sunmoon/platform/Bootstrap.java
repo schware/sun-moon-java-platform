@@ -132,6 +132,11 @@ public final class Bootstrap {
                 Map.entry(new RouteKey(HttpMethod.GET, "/orders"), orderEndpoints.list()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/status"), orderEndpoints.changeStatus()),
 
+                // 개점/마감 — POS presses these, BO only reads the result.
+                Map.entry(new RouteKey(HttpMethod.GET, "/business-days/status"), orderEndpoints.businessDayStatus()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/business-days/open"), orderEndpoints.openBusinessDay()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/business-days/close"), orderEndpoints.closeBusinessDay()),
+
                 // Left from when this runtime was going to own orders; it
                 // writes to nothing now and goes when the flow is proven.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/legacy"), new CreateOrderEndpoint(eventPublisher)));

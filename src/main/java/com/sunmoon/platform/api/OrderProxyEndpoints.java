@@ -88,6 +88,44 @@ public final class OrderProxyEndpoints {
         };
     }
 
+    /** {@code GET /business-days/status?storeId=store-01} — whether that store has 개점'd. */
+    public RestEndpoint businessDayStatus() {
+        return request -> {
+            String storeId = param(request.uri(), "storeId");
+            if (storeId == null || storeId.isBlank()) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "storeId is required"));
+            }
+            try {
+                return passThrough(orders.businessDayStatus(storeId));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
+    /** {@code POST /business-days/open} — body {@code {storeId, deviceId}}, forwarded to Order as-is. */
+    public RestEndpoint openBusinessDay() {
+        return request -> {
+            try {
+                return passThrough(orders.postBusinessDay("open", request.content().toString(StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
+    /** {@code POST /business-days/close} — same body shape as open. */
+    public RestEndpoint closeBusinessDay() {
+        return request -> {
+            try {
+                return passThrough(
+                        orders.postBusinessDay("close", request.content().toString(StandardCharsets.UTF_8)));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
     private static FullHttpResponse passThrough(HttpResponse<String> upstream) {
         byte[] body = upstream.body().getBytes(StandardCharsets.UTF_8);
         FullHttpResponse response = new DefaultFullHttpResponse(

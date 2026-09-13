@@ -1,9 +1,11 @@
 package com.sunmoon.platform.infrastructure.order;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /**
@@ -45,6 +47,24 @@ public final class OrderClient {
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/status"))
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)));
+    }
+
+    /** {@code GET /business-days/{storeId}} — whether that store has 개점'd, and whether it needs 마감. */
+    public HttpResponse<String> businessDayStatus(String storeId) throws Exception {
+        String encoded = URLEncoder.encode(storeId, StandardCharsets.UTF_8);
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/business-days/" + encoded)).GET());
+    }
+
+    /**
+     * {@code POST /business-days/open} or {@code /business-days/close} —
+     * the body is {@code {storeId, deviceId}} either way, so it is
+     * forwarded exactly as the terminal sent it rather than parsed and
+     * rebuilt here.
+     */
+    public HttpResponse<String> postBusinessDay(String action, String jsonBody) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/business-days/" + action))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(jsonBody)));
     }
 
     private HttpResponse<String> send(HttpRequest.Builder request) throws Exception {
