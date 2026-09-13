@@ -53,7 +53,7 @@ public final class TerminalRegistry {
      *         blocks an event-loop thread on I/O.
      */
     public Optional<Channel> register(String deviceId, String storeId, TerminalType type, Channel channel) {
-        TerminalId id = new TerminalId(storeId, deviceId);
+        TerminalId id = new TerminalId(storeId, deviceId, type);
         TerminalGroup group = new TerminalGroup(storeId, type);
 
         sessionsByTerminal.put(id,
@@ -74,8 +74,8 @@ public final class TerminalRegistry {
      * late close would evict the reconnect that replaced it, leaving a
      * live terminal the registry believes is gone.
      */
-    public void unregister(String deviceId, String storeId, Channel channel) {
-        TerminalId id = new TerminalId(storeId, deviceId);
+    public void unregister(String deviceId, String storeId, TerminalType type, Channel channel) {
+        TerminalId id = new TerminalId(storeId, deviceId, type);
         Channel current = channelsByTerminal.get(id);
         if (current != null && current != channel) {
             // Already replaced by a reconnect; this is the old channel
@@ -106,9 +106,13 @@ public final class TerminalRegistry {
                 .toList();
     }
 
-    /** A device id alone does not name a terminal — every store has a {@code pos-01}. */
-    public Optional<Channel> channelFor(String storeId, String deviceId) {
-        return Optional.ofNullable(channelsByTerminal.get(new TerminalId(storeId, deviceId)));
+    /**
+     * A device id alone does not name a terminal — every store has a
+     * {@code pos-01}, and a store's own POS and KDS can both be opened as
+     * device id {@code "01"}.
+     */
+    public Optional<Channel> channelFor(String storeId, String deviceId, TerminalType type) {
+        return Optional.ofNullable(channelsByTerminal.get(new TerminalId(storeId, deviceId, type)));
     }
 
     /** Every connected terminal of one kind in one store — how "tell that shop's kitchen" is expressed. */

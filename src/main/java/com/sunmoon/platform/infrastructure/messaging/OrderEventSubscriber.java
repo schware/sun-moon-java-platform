@@ -136,7 +136,7 @@ public final class OrderEventSubscriber {
      * picks it up on its own poll once someone opens that screen.
      */
     private void routeToOneTerminal(long orderId, String status, String storeId, String deviceId, String json) {
-        Optional<Channel> channel = registry.channelFor(storeId, deviceId);
+        Optional<Channel> channel = registry.channelFor(storeId, deviceId, TerminalType.KDS);
         if (channel.isPresent()) {
             channel.get().writeAndFlush(new TextWebSocketFrame(json));
             log.info("order {} -> {}: pushed to KDS {} at {}", orderId, status, deviceId, storeId);

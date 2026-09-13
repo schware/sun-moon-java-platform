@@ -50,23 +50,29 @@ public final class TerminalEndpoints {
     }
 
     /**
-     * {@code POST /terminals/push?storeId=store-01&deviceId=pos-01} — body
-     * is sent verbatim to that terminal.
+     * {@code POST /terminals/push?storeId=store-01&deviceId=pos-01&type=POS}
+     * — body is sent verbatim to that terminal.
      *
-     * <p>Both keys, because a device id alone does not name a terminal:
-     * every store has a {@code pos-01}.
+     * <p>All three, because a device id alone does not name a terminal:
+     * every store has a {@code pos-01}, and a store's own POS and KDS can
+     * both be opened as device id {@code "01"}.
      */
     public RestEndpoint pushToDevice() {
         return request -> {
             String storeId = param(request.uri(), "storeId");
             String deviceId = param(request.uri(), "deviceId");
+            TerminalType type = parseType(param(request.uri(), "type"));
             if (storeId == null || deviceId == null) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
                         Map.of("error", "storeId and deviceId are required"));
             }
+            if (type == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "type must be one of POS, KDS, DID"));
+            }
             String payload = request.content().toString(StandardCharsets.UTF_8);
 
-            return registry.channelFor(storeId, deviceId)
+            return registry.channelFor(storeId, deviceId, type)
                     .map(channel -> {
                         channel.writeAndFlush(new TextWebSocketFrame(payload));
                         log.debug("pushed {} bytes to {}", payload.length(), deviceId);

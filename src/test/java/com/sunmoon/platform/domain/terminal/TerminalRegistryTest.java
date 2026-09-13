@@ -44,7 +44,7 @@ class TerminalRegistryTest {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
         registry.register("pos-01", STORE, TerminalType.POS, channel);
-        registry.unregister("pos-01", STORE, channel);
+        registry.unregister("pos-01", STORE, TerminalType.POS, channel);
 
         assertEquals(0, registry.size());
         assertTrue(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, GRACE),
@@ -57,7 +57,7 @@ class TerminalRegistryTest {
         TerminalRegistry registry = new TerminalRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
         registry.register("pos-01", STORE, TerminalType.POS, channel);
-        registry.unregister("pos-01", STORE, channel);
+        registry.unregister("pos-01", STORE, TerminalType.POS, channel);
 
         assertFalse(registry.isPresentOrRecentlySeen(STORE, TerminalType.POS, Duration.ZERO),
                 "with no grace at all, a disconnected terminal is absent");
@@ -103,8 +103,28 @@ class TerminalRegistryTest {
                 "a pos-01 in another store must not displace this one");
 
         assertEquals(2, registry.size());
-        assertEquals(atOne, registry.channelFor(STORE, "pos-01").orElseThrow());
-        assertEquals(atTwo, registry.channelFor(OTHER_STORE, "pos-01").orElseThrow());
+        assertEquals(atOne, registry.channelFor(STORE, "pos-01", TerminalType.POS).orElseThrow());
+        assertEquals(atTwo, registry.channelFor(OTHER_STORE, "pos-01", TerminalType.POS).orElseThrow());
+    }
+
+    /**
+     * The bug found 2026-09-13: a store's POS and its KDS opened with the
+     * same device id (both typed "01") displaced each other, each looking
+     * like a dropped connection to the other screen.
+     */
+    @Test
+    void theSameDeviceIdInTwoKindsAtOneStoreIsTwoTerminals() {
+        TerminalRegistry registry = new TerminalRegistry();
+        EmbeddedChannel posChannel = new EmbeddedChannel();
+        EmbeddedChannel kdsChannel = new EmbeddedChannel();
+
+        assertTrue(registry.register("01", STORE, TerminalType.POS, posChannel).isEmpty());
+        assertTrue(registry.register("01", STORE, TerminalType.KDS, kdsChannel).isEmpty(),
+                "a KDS device id \"01\" must not displace a POS device id \"01\" at the same store");
+
+        assertEquals(2, registry.size());
+        assertEquals(posChannel, registry.channelFor(STORE, "01", TerminalType.POS).orElseThrow());
+        assertEquals(kdsChannel, registry.channelFor(STORE, "01", TerminalType.KDS).orElseThrow());
     }
 
     /**
@@ -135,9 +155,9 @@ class TerminalRegistryTest {
         registry.register("pos-01", STORE, TerminalType.POS, first);
         registry.register("pos-01", STORE, TerminalType.POS, second);
 
-        registry.unregister("pos-01", STORE, first);
+        registry.unregister("pos-01", STORE, TerminalType.POS, first);
 
         assertEquals(1, registry.size());
-        assertEquals(second, registry.channelFor(STORE, "pos-01").orElseThrow());
+        assertEquals(second, registry.channelFor(STORE, "pos-01", TerminalType.POS).orElseThrow());
     }
 }

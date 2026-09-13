@@ -147,7 +147,8 @@ class DeviceServerTest {
         assertTrue(get("/terminals").body().contains("kds-01"));
 
         Frames pushed = frames.next();
-        HttpResponse<String> response = post("/terminals/push?storeId=store-01&deviceId=kds-01", "{\"type\":\"TEST\"}");
+        HttpResponse<String> response =
+                post("/terminals/push?storeId=store-01&deviceId=kds-01&type=KDS", "{\"type\":\"TEST\"}");
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"delivered\":true"));
         assertTrue(pushed.await(), "the pushed frame never arrived at the terminal");
@@ -159,7 +160,7 @@ class DeviceServerTest {
     /** An offline terminal is an ordinary state, so the caller is told so rather than misled. */
     @Test
     void pushingToATerminalThatIsNotConnectedIsReportedAsUndelivered() throws Exception {
-        HttpResponse<String> response = post("/terminals/push?storeId=store-01&deviceId=nobody-here", "{}");
+        HttpResponse<String> response = post("/terminals/push?storeId=store-01&deviceId=nobody-here&type=POS", "{}");
 
         assertEquals(404, response.statusCode());
         assertTrue(response.body().contains("\"delivered\":false"), response.body());
