@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sunmoon.platform.domain.terminal.TerminalRegistry;
 import com.sunmoon.platform.domain.terminal.TerminalType;
 import com.sunmoon.platform.infrastructure.order.OrderClient;
+import io.netty.channel.Channel;
 import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import org.redisson.api.RTopic;
 import org.redisson.client.codec.StringCodec;
@@ -13,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.Optional;
 
 /**
  * Listens to Order's {@code order-events} channel and turns each event
@@ -81,6 +83,18 @@ public final class OrderEventSubscriber {
                 return;
             }
 
+            // A menu can be assigned to one specific KDS station rather
+            // than every KDS at the store — the order channel's catalog
+            // decides that, this just carries it out. Every other audience
+            // still broadcasts to its whole group.
+            if (audience == TerminalType.KDS) {
+                String kdsDeviceId = event.path("kdsDeviceId").asText(null);
+                if (kdsDeviceId != null && !kdsDeviceId.isBlank()) {
+                    routeToOneTerminal(orderId, status, storeId, kdsDeviceId, json);
+                    return;
+                }
+            }
+
             int reached = registry.channelsOf(storeId, audience).size();
 
             // A placed order with nowhere to go is refused rather than left
@@ -111,6 +125,23 @@ public final class OrderEventSubscriber {
             // A malformed event must not kill the subscription — the next
             // one still has to arrive.
             log.warn("could not handle order event: {}", json, e);
+        }
+    }
+
+    /**
+     * A station-assigned order has no "nobody's here, reject" fallback —
+     * that safety net exists for PLACED because an unattended order is a
+     * customer left hanging. An accepted order assigned to a station with
+     * nobody watching is not that: it stays ACCEPTED, and the station
+     * picks it up on its own poll once someone opens that screen.
+     */
+    private void routeToOneTerminal(long orderId, String status, String storeId, String deviceId, String json) {
+        Optional<Channel> channel = registry.channelFor(storeId, deviceId);
+        if (channel.isPresent()) {
+            channel.get().writeAndFlush(new TextWebSocketFrame(json));
+            log.info("order {} -> {}: pushed to KDS {} at {}", orderId, status, deviceId, storeId);
+        } else {
+            log.info("order {} -> {}: assigned KDS {} not connected at {}", orderId, status, deviceId, storeId);
         }
     }
 
