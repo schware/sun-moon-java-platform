@@ -11,6 +11,8 @@ import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
+
 /**
  * A terminal's connection, once the upgrade has succeeded.
  *
@@ -40,6 +42,7 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
     private String deviceId;
     private String storeId;
     private TerminalType type;
+    private boolean multiStore;
 
     public TerminalFrameHandler(TerminalRegistry registry) {
         this.registry = registry;
@@ -51,19 +54,26 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
             deviceId = ctx.channel().attr(TerminalHandshakeHandler.DEVICE_ID).get();
             storeId = ctx.channel().attr(TerminalHandshakeHandler.STORE_ID).get();
             type = ctx.channel().attr(TerminalHandshakeHandler.TERMINAL_TYPE).get();
+            List<String> storeIds = ctx.channel().attr(TerminalHandshakeHandler.STORE_IDS).get();
+            // Handshake enforces exactly one store id for POS/KDS, so more
+            // than one here can only mean a multi-store DID.
+            multiStore = type == TerminalType.DID && storeIds.size() > 1;
 
-            registry.register(deviceId, storeId, type, ctx.channel())
-                    // A device reconnecting displaces its old channel. Closing
-                    // it here, off the registry, keeps that map free of I/O.
-                    .ifPresent(displaced -> {
-                        log.info("terminal {} claimed by a new connection; closing the previous one", deviceId);
-                        displaced.writeAndFlush(new CloseWebSocketFrame(
-                                        CLOSE_REPLACED, "device id claimed by another connection"))
-                                .addListener(future -> displaced.close());
-                    });
+            Runnable onDisplaced = () -> {
+                log.info("terminal {} claimed by a new connection; closing the previous one", deviceId);
+            };
+            if (multiStore) {
+                registry.registerMultiStore(deviceId, storeIds, ctx.channel())
+                        .ifPresent(displaced -> closeDisplaced(displaced, onDisplaced));
+                log.info("terminal connected: {} (DID at {} stores: {}) — {} now connected",
+                        deviceId, storeIds.size(), storeIds, registry.size());
+            } else {
+                registry.register(deviceId, storeId, type, ctx.channel())
+                        .ifPresent(displaced -> closeDisplaced(displaced, onDisplaced));
+                log.info("terminal connected: {} ({} at {}) — {} now connected",
+                        deviceId, type, storeId, registry.size());
+            }
 
-            log.info("terminal connected: {} ({} at {}) — {} now connected",
-                    deviceId, type, storeId, registry.size());
             ctx.writeAndFlush(new TextWebSocketFrame(
                     "{\"type\":\"WELCOME\",\"deviceId\":\"" + deviceId
                             + "\",\"storeId\":\"" + storeId
@@ -71,6 +81,14 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
             return;
         }
         super.userEventTriggered(ctx, event);
+    }
+
+    /** A device reconnecting displaces its old channel. Closing it here, off the registry, keeps that map free of I/O. */
+    private static void closeDisplaced(Channel displaced, Runnable onDisplaced) {
+        onDisplaced.run();
+        displaced.writeAndFlush(new CloseWebSocketFrame(
+                        CLOSE_REPLACED, "device id claimed by another connection"))
+                .addListener(future -> displaced.close());
     }
 
     @Override
@@ -88,7 +106,11 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
         if (deviceId != null) {
-            registry.unregister(deviceId, storeId, type, ctx.channel());
+            if (multiStore) {
+                registry.unregisterMultiStore(deviceId, ctx.channel());
+            } else {
+                registry.unregister(deviceId, storeId, type, ctx.channel());
+            }
             log.info("terminal disconnected: {}/{} — {} still connected", storeId, deviceId, registry.size());
         }
         super.channelInactive(ctx);

@@ -4,6 +4,7 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -125,6 +126,52 @@ class TerminalRegistryTest {
         assertEquals(2, registry.size());
         assertEquals(posChannel, registry.channelFor(STORE, "01", TerminalType.POS).orElseThrow());
         assertEquals(kdsChannel, registry.channelFor(STORE, "01", TerminalType.KDS).orElseThrow());
+    }
+
+    /**
+     * A DID watching several stores (2026-09-13) reaches every one of
+     * their PRODUCED events — {@code channelsOf} is what
+     * {@code OrderEventSubscriber} actually pushes through, so this is
+     * what makes the push side of a multi-store DID work with no change
+     * to the subscriber at all.
+     */
+    @Test
+    void aMultiStoreDidIsReachableFromEveryStoreItWatches() {
+        TerminalRegistry registry = new TerminalRegistry();
+        EmbeddedChannel channel = new EmbeddedChannel();
+
+        assertTrue(registry.registerMultiStore("did-mall-01", List.of(STORE, OTHER_STORE), channel).isEmpty());
+
+        assertEquals(1, registry.size());
+        assertTrue(registry.channelsOf(STORE, TerminalType.DID).contains(channel));
+        assertTrue(registry.channelsOf(OTHER_STORE, TerminalType.DID).contains(channel));
+    }
+
+    /** Two multi-store DIDs sharing a device id are one screen, same as a single-store terminal reconnecting. */
+    @Test
+    void reconnectingAMultiStoreDidDisplacesTheOlderConnection() {
+        TerminalRegistry registry = new TerminalRegistry();
+        EmbeddedChannel first = new EmbeddedChannel();
+        EmbeddedChannel second = new EmbeddedChannel();
+
+        assertTrue(registry.registerMultiStore("did-mall-01", List.of(STORE, OTHER_STORE), first).isEmpty());
+        assertEquals(first,
+                registry.registerMultiStore("did-mall-01", List.of(STORE, OTHER_STORE), second).orElseThrow());
+        assertEquals(1, registry.size());
+    }
+
+    /** Disconnecting a multi-store DID must free it from every store's group, not just one. */
+    @Test
+    void unregisteringAMultiStoreDidRemovesItFromEveryGroup() {
+        TerminalRegistry registry = new TerminalRegistry();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        registry.registerMultiStore("did-mall-01", List.of(STORE, OTHER_STORE), channel);
+
+        registry.unregisterMultiStore("did-mall-01", channel);
+
+        assertEquals(0, registry.size());
+        assertFalse(registry.channelsOf(STORE, TerminalType.DID).contains(channel));
+        assertFalse(registry.channelsOf(OTHER_STORE, TerminalType.DID).contains(channel));
     }
 
     /**

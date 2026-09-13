@@ -16,6 +16,7 @@ import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -32,6 +33,13 @@ import java.util.Locale;
  * did not say which shop it is in cannot be routed to, and defaulting it
  * would mean guessing which counter an order belongs to.
  *
+ * <p>For a DID only (2026-09-13), {@code storeId} may be a comma-separated
+ * list — {@code storeId=store-01,store-02,store-03} — a food-court style
+ * board watching several branches at once. POS and KDS are physically at
+ * one counter, so exactly one store is enforced for them; a list there
+ * would be a client mistake worth rejecting rather than silently
+ * accepting the first one.
+ *
  * <p>Rejecting at handshake rather than after upgrade is deliberate: a
  * client that got it wrong gets a status code it can read, instead of an
  * open socket that silently never receives anything.
@@ -40,6 +48,7 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
 
     public static final AttributeKey<String> DEVICE_ID = AttributeKey.valueOf("deviceId");
     public static final AttributeKey<String> STORE_ID = AttributeKey.valueOf("storeId");
+    public static final AttributeKey<List<String>> STORE_IDS = AttributeKey.valueOf("storeIds");
     public static final AttributeKey<TerminalType> TERMINAL_TYPE = AttributeKey.valueOf("terminalType");
 
     private static final String WEBSOCKET_PATH = "/ws";
@@ -82,10 +91,33 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
             return;
         }
 
+        List<String> storeIds = splitStoreIds(storeId);
+        if (storeIds.isEmpty()) {
+            reject(ctx, request, "storeId is required");
+            return;
+        }
+        if (type != TerminalType.DID && storeIds.size() > 1) {
+            reject(ctx, request, "storeId must be exactly one value for " + type);
+            return;
+        }
+
         ctx.channel().attr(DEVICE_ID).set(deviceId);
         ctx.channel().attr(STORE_ID).set(storeId);
+        ctx.channel().attr(STORE_IDS).set(storeIds);
         ctx.channel().attr(TERMINAL_TYPE).set(type);
         ctx.fireChannelRead(message);
+    }
+
+    /** {@code "store-01, store-02"} -> {@code ["store-01", "store-02"]}; blanks and surrounding whitespace dropped. */
+    private static List<String> splitStoreIds(String raw) {
+        List<String> ids = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                ids.add(trimmed);
+            }
+        }
+        return ids;
     }
 
     private static String first(QueryStringDecoder query, String name) {

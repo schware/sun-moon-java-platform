@@ -16,23 +16,31 @@ package com.sunmoon.platform.domain.terminal;
  * exactly that displaced one with the other, each looking like a dropped
  * connection to the other's screen. A device id is only unique within one
  * kind of terminal at one store, not across kinds.
+ *
+ * <p>{@code storeId} is null only for a DID watching more than one store
+ * (2026-09-13): a screen showing several branches is not "at" any one of
+ * them, so its identity cannot be scoped to a store the way a POS or KDS
+ * counter's can. Its device id is what has to be unique instead — one
+ * physical screen, one connection, regardless of which stores it is
+ * configured to show. POS and KDS always have a storeId; a single-store
+ * DID does too, for the common case.
  */
 public record TerminalId(String storeId, String deviceId, TerminalType type) {
 
     public TerminalId {
-        if (storeId == null || storeId.isBlank()) {
-            throw new IllegalArgumentException("storeId is required");
-        }
         if (deviceId == null || deviceId.isBlank()) {
             throw new IllegalArgumentException("deviceId is required");
         }
         if (type == null) {
             throw new IllegalArgumentException("type is required");
         }
+        if (type != TerminalType.DID && (storeId == null || storeId.isBlank())) {
+            throw new IllegalArgumentException("storeId is required for " + type);
+        }
     }
 
     @Override
     public String toString() {
-        return storeId + "/" + type + "/" + deviceId;
+        return (storeId == null ? "*" : storeId) + "/" + type + "/" + deviceId;
     }
 }

@@ -56,10 +56,35 @@ public final class TerminalRegistry {
         TerminalId id = new TerminalId(storeId, deviceId, type);
         TerminalGroup group = new TerminalGroup(storeId, type);
 
-        sessionsByTerminal.put(id,
-                new TerminalSession(deviceId, storeId, type, channel.id().asShortText(), Instant.now()));
+        sessionsByTerminal.put(id, new TerminalSession(
+                deviceId, storeId, List.of(storeId), type, channel.id().asShortText(), Instant.now()));
         groupFor(group).add(channel);
         lastSeenByGroup.put(group, Instant.now());
+
+        Channel displaced = channelsByTerminal.put(id, channel);
+        return Optional.ofNullable(displaced == channel ? null : displaced);
+    }
+
+    /**
+     * A DID watching several stores at once (2026-09-13) — a food-court
+     * style board, not one branch's screen. Its identity does not depend
+     * on the store list (see {@link TerminalId}), and it is added to
+     * every one of those stores' DID {@link ChannelGroup}, so
+     * {@link #channelsOf} already reaches it the moment any of them has
+     * a {@code PRODUCED} order — the subscriber that pushes those events
+     * needed no change at all for this.
+     */
+    public Optional<Channel> registerMultiStore(String deviceId, List<String> storeIds, Channel channel) {
+        TerminalId id = new TerminalId(null, deviceId, TerminalType.DID);
+        Instant now = Instant.now();
+
+        sessionsByTerminal.put(id,
+                new TerminalSession(deviceId, null, storeIds, TerminalType.DID, channel.id().asShortText(), now));
+        for (String storeId : storeIds) {
+            TerminalGroup group = new TerminalGroup(storeId, TerminalType.DID);
+            groupFor(group).add(channel);
+            lastSeenByGroup.put(group, now);
+        }
 
         Channel displaced = channelsByTerminal.put(id, channel);
         return Optional.ofNullable(displaced == channel ? null : displaced);
@@ -97,6 +122,27 @@ public final class TerminalRegistry {
             // when the terminal actually went rather than from whenever
             // someone next asks.
             lastSeenByGroup.put(leaving.group(), Instant.now());
+        }
+    }
+
+    /** The multi-store counterpart to {@link #unregister} — see {@link #registerMultiStore}. */
+    public void unregisterMultiStore(String deviceId, Channel channel) {
+        TerminalId id = new TerminalId(null, deviceId, TerminalType.DID);
+        Channel current = channelsByTerminal.get(id);
+        if (current != null && current != channel) {
+            groupsRemove(channel);
+            return;
+        }
+
+        TerminalSession leaving = sessionsByTerminal.remove(id);
+        channelsByTerminal.remove(id, channel);
+        groupsRemove(channel);
+
+        if (leaving != null) {
+            Instant now = Instant.now();
+            for (String storeId : leaving.storeIds()) {
+                lastSeenByGroup.put(new TerminalGroup(storeId, TerminalType.DID), now);
+            }
         }
     }
 
