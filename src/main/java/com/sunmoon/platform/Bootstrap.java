@@ -6,6 +6,9 @@ import com.sunmoon.platform.api.TerminalEndpoints;
 import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
 import com.sunmoon.platform.domain.terminal.DeviceDirectory;
 import com.sunmoon.platform.domain.terminal.TerminalRegistry;
+import com.sunmoon.platform.domain.terminal.TerminalType;
+import com.sunmoon.platform.observability.MetricsRegistry;
+import io.micrometer.core.instrument.Gauge;
 import com.sunmoon.platform.batch.BatchScheduler;
 import com.sunmoon.platform.batch.OrderSummaryBatchJob;
 import com.sunmoon.platform.batch.OrderSummaryReport;
@@ -72,6 +75,7 @@ public final class Bootstrap {
         // and everything about them is answered over REST on the same port.
         TerminalRegistry terminals = new TerminalRegistry();
         DeviceDirectory directory = new AcceptKnownFormatDirectory();
+        registerTerminalGauges(terminals);
 
         OrderClient orderClient = new OrderClient(config.orderServiceUrl());
         subscribeToOrderEvents(config, terminals, orderClient);
@@ -85,6 +89,36 @@ public final class Bootstrap {
         runStartupBatchJob(orders);
 
         new CoreRuntime(listeners).start();
+    }
+
+    /**
+     * How many terminals are connected, as a metric.
+     *
+     * <p>The one number on this server that is about the shop rather than
+     * about the machine, and the one most worth graphing next to CPU: a
+     * counter that goes dark has a cause, and "the CPU was pinned by two
+     * concurrent docker builds" has already been that cause once.
+     *
+     * <p>Gauges read the registry on each scrape rather than being
+     * incremented on connect and decremented on close. A counter kept by
+     * hand drifts the first time a disconnect path is missed — and there
+     * are several, since a channel can close for several reasons.
+     */
+    private static void registerTerminalGauges(TerminalRegistry terminals) {
+        Gauge.builder("terminals_connected", terminals, TerminalRegistry::size)
+                .description("Terminals currently holding a WebSocket to this server")
+                .register(MetricsRegistry.get());
+
+        for (TerminalType type : TerminalType.values()) {
+            Gauge.builder("terminals_connected_by_type", terminals, r -> countOf(r, type))
+                    .tag("type", type.name())
+                    .description("Connected terminals of one kind, across every store")
+                    .register(MetricsRegistry.get());
+        }
+    }
+
+    private static double countOf(TerminalRegistry terminals, TerminalType type) {
+        return terminals.connected().stream().filter(session -> session.type() == type).count();
     }
 
     /**
