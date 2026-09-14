@@ -106,6 +106,25 @@ The API prefix is the one to understand: BO's SPA route `/board` and its
 endpoint `GET /board` were the same URL, so refreshing a screen returned
 JSON. Any future service that grows a UI will hit this the same way.
 
+**Every SPA route needs a line in `WebConfig` and one in `SecurityConfig`,
+and forgetting either is silent.** A missing `WebConfig` forward 404s only
+on refresh — clicking through the menu works — which is how `/menus` and
+`/stores` stayed broken for five days after they shipped. Listed one by
+one rather than matched by wildcard, because a catch-all would also
+swallow genuine API 404s and turn "no such endpoint" into a page of HTML.
+
+```bash
+# Client routes the SPA declares, vs. routes the server forwards.
+grep -o "path=\"/[a-z-]*\"" bo/frontend/src/App.tsx | cut -d'"' -f2 | sort -u
+grep -o '"/[a-z-]*"' bo/src/main/java/com/sunmoon/bo/config/WebConfig.java | tr -d '"' | sort -u
+```
+
+**BO is also the only service here that reads other services.** 매출 조회
+calls Order, 단말 현황 calls the Device Server, and both are read-only: BO
+owns 기준 정보 and neither 매출 nor a live connection is 기준 정보. The
+rule that keeps this honest is that a dead upstream must render as a 502
+naming it, never as an empty table — see `UpstreamUnavailableException`.
+
 ```bash
 for s in $SERVICES; do
   frontend=$( [ -d $s/frontend ] && echo yes || echo no )
