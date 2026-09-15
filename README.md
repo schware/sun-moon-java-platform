@@ -82,6 +82,21 @@ Docker approach ever needs to be un-done.
 - [`docs/adr/0005`](docs/adr/0005-bo-ships-its-own-react-console.md) — why
   BO's React/TypeScript console ships inside its own jar, and why that
   forced the API under `/api`.
+- [`docs/adr/0006`](docs/adr/0006-business-day-and-the-sales-key.md) —
+  why 영업일 lives in Order rather than BO, why nothing closes a store on
+  a timer, and the four-part sales key everything else hangs off.
+- [`docs/adr/0007`](docs/adr/0007-a-table-is-a-destination-and-qr-codes-are-not-one-thing.md)
+  — a table is where an order *goes*, not a session or a bill, and why
+  테이블 QR and 주문 QR get separate code spaces instead of one abstraction.
+- [`docs/adr/0008`](docs/adr/0008-execution-plane-services-read-bo-master-through-a-view.md)
+  — how OMS and APP-SERVER read BO's master at runtime (postgres_fdw view,
+  read-only), and why that is a deliberate boundary change.
+- [`docs/adr/0009`](docs/adr/0009-the-pos-terminal-mints-the-transaction-number.md)
+  — 거래번호 is minted by the POS terminal, not the server, and the unique
+  constraint that makes re-sending a transaction safe.
+- [`docs/adr/0010`](docs/adr/0010-the-pos-terminal-holds-state-without-a-store-server.md)
+  — no store server; the POS keeps its own SQLite, becomes the origin of
+  its transactions, and uploads them in batches.
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
