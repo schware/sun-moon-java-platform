@@ -1,6 +1,7 @@
 package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.CreateOrderEndpoint;
+import com.sunmoon.platform.api.MenuProxyEndpoints;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
 import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
@@ -17,7 +18,9 @@ import com.sunmoon.platform.core.ListenerSpec;
 import com.sunmoon.platform.domain.order.OrderRepository;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
+import com.sunmoon.platform.infrastructure.messaging.MenuEventSubscriber;
 import com.sunmoon.platform.infrastructure.messaging.OrderEventSubscriber;
+import com.sunmoon.platform.infrastructure.appserver.AppServerClient;
 import com.sunmoon.platform.infrastructure.order.OrderClient;
 import com.sunmoon.platform.infrastructure.cache.RedissonClientFactory;
 import com.sunmoon.platform.infrastructure.persistence.InMemoryOrderRepository;
@@ -78,11 +81,12 @@ public final class Bootstrap {
         registerTerminalGauges(terminals);
 
         OrderClient orderClient = new OrderClient(config.orderServiceUrl());
-        subscribeToOrderEvents(config, terminals, orderClient);
+        AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
+        subscribeToEvents(config, terminals, orderClient);
 
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
-                        apiRoutes(eventPublisher, terminals, orderClient),
+                        apiRoutes(eventPublisher, terminals, orderClient, appServerClient),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -149,10 +153,12 @@ public final class Bootstrap {
      * Spring Order service on 8083.
      */
     private static Map<RouteKey, RestEndpoint> apiRoutes(
-            EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient) {
+            EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient,
+            AppServerClient appServerClient) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
+        MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
@@ -166,6 +172,11 @@ public final class Bootstrap {
                 Map.entry(new RouteKey(HttpMethod.GET, "/orders"), orderEndpoints.list()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/status"), orderEndpoints.changeStatus()),
 
+                // The terminal's local master: what this store sells today
+                // and what it has run out of. Read from APP-SERVER, which
+                // reads BO — the terminal knows neither.
+                Map.entry(new RouteKey(HttpMethod.GET, "/menus"), menuEndpoints.menus()),
+
                 // 개점/마감 — POS presses these, BO only reads the result.
                 Map.entry(new RouteKey(HttpMethod.GET, "/business-days/status"), orderEndpoints.businessDayStatus()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/business-days/open"), orderEndpoints.openBusinessDay()),
@@ -177,29 +188,35 @@ public final class Bootstrap {
     }
 
     /**
-     * Subscribes to Order's events, when there is a Redis to subscribe to.
+     * Subscribes to the two channels terminals care about, when there is a
+     * Redis to subscribe to: Order's {@code order-events} and BO's
+     * {@code menu-events} (결품).
      *
      * <p>Absent {@code REDIS_URL} the server still runs: terminals connect
-     * and can still fetch orders, they simply are not nudged. That keeps a
-     * machine with only a JDK runnable, the same bargain as the fake
-     * repositories (docs/adr/0003).
+     * and can still fetch orders and menus, they simply are not nudged.
+     * That keeps a machine with only a JDK runnable, the same bargain as
+     * the fake repositories (docs/adr/0003).
+     *
+     * <p>One Redisson client for both. Two would be two connection pools
+     * to the same server for no gain — and the subscriptions are
+     * independent of each other, not of the connection.
      */
-    private static void subscribeToOrderEvents(
+    private static void subscribeToEvents(
             PlatformConfig config, TerminalRegistry terminals, OrderClient orderClient) {
 
         if (config.redisUrl() == null) {
-            log.info("REDIS_URL not set — terminals will not be pushed order events");
+            log.info("REDIS_URL not set — terminals will not be pushed order or menu events");
             return;
         }
         try {
-            new OrderEventSubscriber(
-                    RedissonClientFactory.create(config.redisUrl()), terminals, orderClient,
-                    config.terminalGrace()).start();
+            var redisson = RedissonClientFactory.create(config.redisUrl());
+            new OrderEventSubscriber(redisson, terminals, orderClient, config.terminalGrace()).start();
+            new MenuEventSubscriber(redisson, terminals).start();
         } catch (RuntimeException e) {
             // Loud, but not fatal: the terminals are still usable by polling,
             // and a Device Server that refuses to start because Redis is
             // down would take the screens with it.
-            log.error("could not subscribe to order events — terminals will not be nudged", e);
+            log.error("could not subscribe to events — terminals will not be nudged", e);
         }
     }
 

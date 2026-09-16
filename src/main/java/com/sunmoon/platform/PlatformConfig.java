@@ -16,15 +16,18 @@ public final class PlatformConfig {
     private final int socketPort;
     private final int workerThreads;
     private final String orderServiceUrl;
+    private final String appServerUrl;
     private final String redisUrl;
     private final Duration terminalGrace;
 
     private PlatformConfig(int apiPort, int socketPort, int workerThreads,
-                           String orderServiceUrl, String redisUrl, Duration terminalGrace) {
+                           String orderServiceUrl, String appServerUrl, String redisUrl,
+                           Duration terminalGrace) {
         this.apiPort = apiPort;
         this.socketPort = socketPort;
         this.workerThreads = workerThreads;
         this.orderServiceUrl = orderServiceUrl;
+        this.appServerUrl = appServerUrl;
         this.redisUrl = redisUrl;
         this.terminalGrace = terminalGrace;
     }
@@ -37,6 +40,7 @@ public final class PlatformConfig {
                 Integer.parseInt(env.getOrDefault("WORKER_THREADS",
                         String.valueOf(Runtime.getRuntime().availableProcessors() * 4))),
                 env.getOrDefault("ORDER_SERVICE_URL", "http://localhost:8083/order"),
+                env.getOrDefault("APP_SERVER_URL", "http://localhost:8086/app-server"),
                 env.get("REDIS_URL"),
                 Duration.parse(env.getOrDefault("TERMINAL_GRACE", "PT3M")));
     }
@@ -62,6 +66,16 @@ public final class PlatformConfig {
     /** Where the Spring Order service listens, context-path included. */
     public String orderServiceUrl() {
         return orderServiceUrl;
+    }
+
+    /**
+     * Where APP-SERVER listens, context-path included. Terminals read
+     * their menu master (결품 included) through this server rather than
+     * going there directly — APP-SERVER is LAN-only and terminals are
+     * opened from the public hub.
+     */
+    public String appServerUrl() {
+        return appServerUrl;
     }
 
     /**
