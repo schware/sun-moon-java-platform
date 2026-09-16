@@ -13,3 +13,6 @@
 [submodule "channel-order"]
 	path = channel-order
 	url = https://github.com/schware/sun-moon-java-platform-channel-order.git
+[submodule "app-server"]
+	path = app-server
+	url = https://github.com/schware/sun-moon-java-platform-app-server.git

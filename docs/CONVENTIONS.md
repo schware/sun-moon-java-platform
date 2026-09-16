@@ -1,13 +1,15 @@
 # Family conventions — and how to check them in one command
 
-Four services live in this family: **order**, **kds**, **delivery**, **bo**.
+Five services follow the rules below: **order**, **kds**, **delivery**,
+**bo**, **app-server**. A sixth, **channel-order**, deliberately does not
+— see its own section.
 They agree on more than a reader would guess, and the agreements are not
 written down in any build file — they exist because each service was
 copied from the last one.
 
 This document exists so that "what are the conventions?" is a question you
 **run**, not a question you ask. Every rule below comes with the command
-that proves it, and every command loops over all four services so a
+that proves it, and every command loops over all five services so a
 disagreement shows up as an odd row rather than as something you have to
 notice.
 
@@ -22,7 +24,7 @@ cd sun-moon-java-platform
 Throughout, `SERVICES` is the loop:
 
 ```bash
-SERVICES="order kds delivery bo"
+SERVICES="order kds delivery bo app-server"
 ```
 
 ---
@@ -133,6 +135,19 @@ for s in $SERVICES; do
 done
 ```
 
+### app-server — follows the rules, just has less in it yet
+
+`app-server` (APP-SERVER, the customer-side door — umbrella ADR-0007) is
+in `$SERVICES` and passes every check above. It was scaffolded from
+`delivery` in 2026-09-16, which is what §4 asks for.
+
+One thing will look like drift and is not: **it has no persistence
+starter.** That is a "not yet", not a design difference like
+channel-order's. It will own App·QR master tables, but their shape is not
+settled, and declaring `starter-jdbc` without a `spring.datasource.url`
+makes the service fail to start rather than start without a database. The
+starter arrives with the first table.
+
 ### channel-order — a fifth service, deliberately unlike the four above
 
 `channel-order` (the 주문 채널 / order-placing screen) is not in `$SERVICES`
@@ -178,6 +193,7 @@ done
 | delivery | 8082 | `/delivery` |
 | order | 8083 | `/order` |
 | channel-order | 8085 | `/channel-order` |
+| app-server | 8086 | `/app-server` |
 
 Ports come from the server-wide scheme, not from this repo — see
 `Debian-Setting`'s `docs/docker.md`. **Order's `application.yml` still
