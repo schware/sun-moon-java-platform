@@ -41,9 +41,20 @@ public final class OrderClient {
 
     /** {@code PUT /orders/{id}/status} — the move itself is still Order's to allow or refuse. */
     public HttpResponse<String> changeStatus(long orderId, String status, String deviceId) throws Exception {
-        String body = deviceId == null
-                ? "{\"status\":\"" + status + "\"}"
-                : "{\"status\":\"" + status + "\",\"deviceId\":\"" + deviceId + "\"}";
+        return changeStatus(orderId, status, deviceId, null);
+    }
+
+    /**
+     * 수락과 함께 거래번호가 실립니다. <b>POS가 채번한 값</b>이고, 이
+     * 서버도 Order도 그것을 만들지 않습니다 (umbrella docs/adr/0009) —
+     * 네트워크가 끊긴 매장의 POS도 계속 팔아야 하기 때문입니다.
+     */
+    public HttpResponse<String> changeStatus(long orderId, String status, String deviceId, String tranNo)
+            throws Exception {
+        String body = "{\"status\":\"" + status + "\""
+                + (deviceId == null ? "" : ",\"deviceId\":" + json(deviceId))
+                + (tranNo == null ? "" : ",\"tranNo\":" + json(tranNo))
+                + "}";
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/status"))
                 .header("Content-Type", "application/json")
                 .PUT(HttpRequest.BodyPublishers.ofString(body)));

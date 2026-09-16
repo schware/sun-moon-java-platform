@@ -60,6 +60,11 @@ public final class OrderProxyEndpoints {
      * <p>A terminal accepting an order is the one place a device id
      * matters, so it is a parameter here rather than something the
      * terminal has to remember to put in a body.
+     *
+     * <p>{@code tranNo} rides along on the same call — 거래번호는 POS가
+     * 채번해서 수락과 함께 들고 옵니다 (umbrella docs/adr/0009). 이
+     * 서버는 만들지도 검사하지도 않고 넘기기만 합니다: 같은 번호가 두
+     * 번 오는 것은 Order 쪽 데이터베이스의 유일 제약이 막습니다.
      */
     public RestEndpoint changeStatus() {
         return request -> {
@@ -81,7 +86,8 @@ public final class OrderProxyEndpoints {
             try {
                 // A 409 from Order means the move was not allowed — that is
                 // an answer, not a failure, and it reaches the terminal intact.
-                return passThrough(orders.changeStatus(orderId, status, deviceId));
+                return passThrough(orders.changeStatus(
+                        orderId, status, deviceId, param(request.uri(), "tranNo")));
             } catch (Exception e) {
                 return unreachable(e);
             }
