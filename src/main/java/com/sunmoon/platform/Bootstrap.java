@@ -172,6 +172,10 @@ public final class Bootstrap {
                 Map.entry(new RouteKey(HttpMethod.GET, "/orders"), orderEndpoints.list()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/status"), orderEndpoints.changeStatus()),
 
+                // 수령 확인 — 손님이 번호를 내밀고 가져가는 순간. 상태
+                // 전이와 따로인 이유는 번호 검사가 붙어 있기 때문입니다.
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/pickup"), orderEndpoints.handOver()),
+
                 // The terminal's local master: what this store sells today
                 // and what it has run out of. Read from APP-SERVER, which
                 // reads BO — the terminal knows neither.

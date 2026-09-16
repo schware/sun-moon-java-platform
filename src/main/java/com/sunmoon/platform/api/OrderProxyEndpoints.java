@@ -88,6 +88,34 @@ public final class OrderProxyEndpoints {
         };
     }
 
+    /**
+     * {@code POST /orders/pickup?id=1&pin=0042&deviceId=kds-01}
+     *
+     * <p>수령 확인. Order의 답을 상태 코드까지 그대로 넘깁니다 —
+     * 403(번호 불일치)과 409(아직/이미)는 직원이 손님에게 할 말이
+     * 다르고, 여기서 200으로 뭉개면 그 구분이 사라집니다.
+     */
+    public RestEndpoint handOver() {
+        return request -> {
+            String rawId = param(request.uri(), "id");
+            if (rawId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id is required"));
+            }
+            long orderId;
+            try {
+                orderId = Long.parseLong(rawId);
+            } catch (NumberFormatException notANumber) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
+            }
+            try {
+                return passThrough(orders.handOver(
+                        orderId, param(request.uri(), "pin"), param(request.uri(), "deviceId")));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
     /** {@code GET /business-days/status?storeId=store-01} — whether that store has 개점'd. */
     public RestEndpoint businessDayStatus() {
         return request -> {

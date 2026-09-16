@@ -49,6 +49,26 @@ public final class OrderClient {
                 .PUT(HttpRequest.BodyPublishers.ofString(body)));
     }
 
+    /**
+     * {@code POST /orders/{id}/pickup} — 손님이 번호를 내밀고 가져가는 순간.
+     *
+     * <p>일반 상태 전이와 따로 부르는 이유는 Order 쪽에서 따로 있는
+     * 이유와 같습니다: 번호 검사와 전이가 한 덩어리여야 빠뜨릴 수가
+     * 없습니다. 403(번호 불일치)과 409(아직/이미)가 서로 다른 답이고,
+     * 둘 다 그대로 단말에 전달됩니다.
+     */
+    public HttpResponse<String> handOver(long orderId, String pin, String deviceId) throws Exception {
+        String body = "{\"pin\":" + json(pin) + ",\"deviceId\":" + json(deviceId) + "}";
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/pickup"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body)));
+    }
+
+    /** null 은 JSON null 로, 값은 따옴표로. 이 두 필드에 따옴표가 들어올 일은 없습니다. */
+    private static String json(String value) {
+        return value == null ? "null" : "\"" + value.replace("\"", "") + "\"";
+    }
+
     /** {@code GET /business-days/{storeId}} — whether that store has 개점'd, and whether it needs 마감. */
     public HttpResponse<String> businessDayStatus(String storeId) throws Exception {
         String encoded = URLEncoder.encode(storeId, StandardCharsets.UTF_8);
