@@ -196,9 +196,15 @@ done
 | app-server | 8086 | `/app-server` |
 
 Ports come from the server-wide scheme, not from this repo — see
-`Debian-Setting`'s `docs/docker.md`. **Order's `application.yml` still
-says 8080** and is overridden by `-e SERVER_PORT=8083` at run time, so
-source and reality disagree there; that is a known wart, not the rule.
+`Debian-Setting`'s `docs/docker.md`.
+
+Order's `application.yml` said `8080` until 2026-09-17 and was overridden
+by `-e SERVER_PORT=8083` at run time, so source and reality disagreed.
+That is fixed: **the default in the file is now the real port.** The
+run-time flag is still passed and still harmless, but forgetting it no
+longer lands Order on BO's 8080 — which was the bad part, because both
+services start, both pass health, and only one of them is reachable from
+outside.
 
 **The context-path must appear in three places, and they drift apart
 silently.** This command shows all three at once:
