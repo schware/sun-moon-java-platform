@@ -97,6 +97,9 @@ Docker approach ever needs to be un-done.
 - [`docs/adr/0010`](docs/adr/0010-the-pos-terminal-holds-state-without-a-store-server.md)
   — no store server; the POS keeps its own SQLite, becomes the origin of
   its transactions, and uploads them in batches.
+- [`docs/adr/0011`](docs/adr/0011-sold-out-and-the-pickup-number.md)
+  — 결품 is keyed by 판매일자 so 개점 clears it with no batch to forget, and
+  수령번호 is two values with two jobs (부르는 번호 / 증명하는 번호).
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
