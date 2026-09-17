@@ -274,6 +274,36 @@ Permissions split four ways rather than one. Bundled, anyone who can post a
 notice could also change which file gets installed on shop hardware, and
 those are not the same weight of action.
 
+## Addendum, 2026-09-18: 이 상태들은 손님 쪽으로 가지 않는다
+
+문서 §5.4 는 "매장 주문 가능 상태 / 결품 / POS 개점 / POS 마감 / 재개점 /
+POS Live 가 변경되면 **APP-Server와 외부 채널에** 전달한다"고 적고 있고,
+저는 그것을 다음 작업의 2순위로 올렸습니다. Sun&Moon이 정정했습니다:
+
+> **"APP은 개점,마감 Live 할 필요 없어요. APP은 사용자잖아요."**
+
+맞습니다. 제가 **POS-Server가 아는 것**과 **손님이 알아야 하는 것**을
+섞었습니다.
+
+- **APP-SERVER는 우리 플랫폼 안에 있어서 물어볼 수 있습니다.** QR 게이트와
+  매장 선택 경로 둘 다 이미 주문 직전에 Order 에 영업 상태를 묻고
+  `STORE_CLOSED` / `ENTRY_REFUSED` 로 막습니다. 밀어 주면 같은 사실이
+  두 곳에 생기고, 그건 이 ADR이 Live Check 의 영업 축을 §3.4 에서 직접
+  읽게 한 이유와 정확히 같은 이유로 나쁩니다.
+- **개점·마감·Live 는 매장 운영의 사실입니다.** 손님 앱이 pos-01 의
+  프린터 상태를 알 이유가 없습니다. 그리고 단말 단위 개점/마감은 손님이
+  묻는 질문("여기서 지금 시킬 수 있나")과 **다른 축**입니다 — 이 ADR이
+  Order 의 매장 영업일과 POS-Server 의 단말 개점을 굳이 갈라 둔 그
+  구분이, 여기서 한 번 더 쓰입니다.
+
+그러면 §5.4 의 진짜 대상은 **외부 채널**입니다. 배민·쿠팡이츠는 밖에
+있어서 물어볼 수가 없고, 자기 앱에서 매장을 회색으로 만들려면 받아야
+합니다. 그래서 이 일은 **외부 채널이 실제로 붙는 날**의 일이고, 그전에는
+만들 대상이 없습니다.
+
+일반화하면: **밖으로 밀지, 안에서 물을지는 "물어볼 수 있는가"로 정합니다.**
+플랫폼 안이면 묻게 두고, 밖이면 밀어 줍니다.
+
 ## Open
 
 - **ETC 매출 분해** — originals are received (`etc_sale_log`) but not
