@@ -20,10 +20,11 @@ public final class PlatformConfig {
     private final String redisUrl;
     private final Duration terminalGrace;
     private final Duration heartbeatGrace;
+    private final Duration clockTolerance;
 
     private PlatformConfig(int apiPort, int socketPort, int workerThreads,
                            String orderServiceUrl, String appServerUrl, String redisUrl,
-                           Duration terminalGrace, Duration heartbeatGrace) {
+                           Duration terminalGrace, Duration heartbeatGrace, Duration clockTolerance) {
         this.apiPort = apiPort;
         this.socketPort = socketPort;
         this.workerThreads = workerThreads;
@@ -32,6 +33,7 @@ public final class PlatformConfig {
         this.redisUrl = redisUrl;
         this.terminalGrace = terminalGrace;
         this.heartbeatGrace = heartbeatGrace;
+        this.clockTolerance = clockTolerance;
     }
 
     public static PlatformConfig fromEnv() {
@@ -45,7 +47,8 @@ public final class PlatformConfig {
                 env.getOrDefault("APP_SERVER_URL", "http://localhost:8086/app-server"),
                 env.get("REDIS_URL"),
                 Duration.parse(env.getOrDefault("TERMINAL_GRACE", "PT3M")),
-                Duration.parse(env.getOrDefault("POS_HEARTBEAT_GRACE", "PT2M")));
+                Duration.parse(env.getOrDefault("POS_HEARTBEAT_GRACE", "PT2M")),
+                Duration.parse(env.getOrDefault("POS_CLOCK_TOLERANCE", "PT30S")));
     }
 
     public int apiPort() {
@@ -117,5 +120,17 @@ public final class PlatformConfig {
      */
     public Duration heartbeatGrace() {
         return heartbeatGrace;
+    }
+
+    /**
+     * POS 시계가 이보다 더 틀어지면 손봐야 합니다 (§3.5 System Date 동기화).
+     *
+     * <p>30초가 기본인 이유: 영수증 시각이 몇 초 다른 것은 아무도
+     * 모르지만, 자정 언저리에 1분이 틀어지면 <b>매출이 다른 날로
+     * 갑니다</b>. 판매일자는 하루의 경계라 작은 오차가 큰 사고가 되는
+     * 유일한 자리입니다 (umbrella docs/adr/0006).
+     */
+    public Duration clockTolerance() {
+        return clockTolerance;
     }
 }

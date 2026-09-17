@@ -35,6 +35,7 @@ class PosLiveServiceTest {
     private static final LocalDate DAY = LocalDate.of(2026, 9, 17);
     private static final Instant NOW = Instant.parse("2026-09-17T03:00:00Z");
     private static final Duration GRACE = Duration.ofMinutes(2);
+    private static final Duration TOLERANCE = Duration.ofSeconds(30);
 
     private TerminalRegistry terminals;
     private FakeLiveRepository reports;
@@ -52,7 +53,7 @@ class PosLiveServiceTest {
     }
 
     private PosLiveService service(PosLiveService.SaleFailureLookup failures) {
-        return new PosLiveService(terminals, reports, business, failures, GRACE,
+        return new PosLiveService(terminals, reports, business, failures, GRACE, TOLERANCE,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -62,7 +63,7 @@ class PosLiveServiceTest {
 
     private void heartbeat(AxisState application, AxisState device, AxisState data, Instant at) {
         reports.report(new PosHeartbeat(STORE, POS, application, device, data,
-                "1.4.2", "37", null, at));
+                "1.4.2", "37", null, null, null, at));
     }
 
     /**
@@ -197,6 +198,59 @@ class PosLiveServiceTest {
         // 연결이 없으므로 종합은 DOWN 입니다. 중요한 것은 프로그램 축이
         // DOWN 으로 둔갑하지 않았다는 점입니다.
         assertEquals(AxisState.DOWN, view.overall());
+    }
+
+    /**
+     * 시계가 틀어진 단말은 다섯 축이 <b>전부 정상</b>일 수 있습니다.
+     *
+     * <p>그게 여섯 번째 축을 만들지 않고 어긋남으로 낸 이유입니다 —
+     * 축은 문서가 다섯이라고 했고, 시계는 축의 상태가 아니라 축들이
+     * 말해 주지 않는 사실입니다. 그런데 그대로 두면 그 단말의 매출이
+     * 다른 날로 갑니다 (umbrella docs/adr/0006).
+     */
+    @Test
+    void aTerminalWithAWrongClockLooksHealthyOnEveryAxis() {
+        connect();
+        business.open(STORE, POS, DAY);
+        // POS가 90초 느린 시각을 들고 보고합니다.
+        service().report(new PosHeartbeat(STORE, POS, AxisState.OK, AxisState.OK, AxisState.OK,
+                "1.4.2", "37", null, NOW.minusSeconds(90), null, NOW.minusSeconds(10)));
+
+        PosLiveService.PosLiveView view = service().viewOf(STORE, POS, DAY);
+
+        assertEquals(AxisState.OK, view.overall());
+        assertEquals(90, view.clockDriftSeconds());
+        assertTrue(view.mismatches().stream().anyMatch(m -> m.contains("느립니다")),
+                view.mismatches().toString());
+    }
+
+    /** 허용 범위 안이면 아무 말도 하지 않습니다 — 몇 초는 늘 틀어져 있습니다. */
+    @Test
+    void aSmallDriftIsNotWorthSaying() {
+        connect();
+        business.open(STORE, POS, DAY);
+        service().report(new PosHeartbeat(STORE, POS, AxisState.OK, AxisState.OK, AxisState.OK,
+                "1.4.2", "37", null, NOW.minusSeconds(5), null, NOW.minusSeconds(5)));
+
+        PosLiveService.PosLiveView view = service().viewOf(STORE, POS, DAY);
+
+        assertTrue(view.mismatches().isEmpty(), view.mismatches().toString());
+        assertTrue(view.normal());
+    }
+
+    /** 빠른 시계와 느린 시계는 다른 고장입니다 — 부호를 지우지 않습니다. */
+    @Test
+    void aClockRunningFastIsSaidDifferently() {
+        connect();
+        business.open(STORE, POS, DAY);
+        service().report(new PosHeartbeat(STORE, POS, AxisState.OK, AxisState.OK, AxisState.OK,
+                "1.4.2", "37", null, NOW.plusSeconds(120), null, NOW.minusSeconds(5)));
+
+        PosLiveService.PosLiveView view = service().viewOf(STORE, POS, DAY);
+
+        assertEquals(-120, view.clockDriftSeconds());
+        assertTrue(view.mismatches().stream().anyMatch(m -> m.contains("빠릅니다")),
+                view.mismatches().toString());
     }
 
     private static final class FakeLiveRepository implements PosLiveRepository {

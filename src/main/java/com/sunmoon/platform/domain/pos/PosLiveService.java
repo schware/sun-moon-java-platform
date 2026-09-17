@@ -67,7 +67,7 @@ public final class PosLiveService {
             String storeId, String posNo,
             Map<LiveAxis, AxisState> axes, AxisState overall,
             String programVersion, String dbVersion,
-            Instant lastReportedAt, List<String> mismatches) {
+            Integer clockDriftSeconds, Instant lastReportedAt, List<String> mismatches) {
 
         public boolean normal() {
             return overall.normal();
@@ -79,21 +79,43 @@ public final class PosLiveService {
     private final PosBusinessRepository business;
     private final SaleFailureLookup failures;
     private final Duration heartbeatGrace;
+    private final Duration clockTolerance;
     private final Clock clock;
 
     public PosLiveService(TerminalRegistry terminals, PosLiveRepository reports,
                           PosBusinessRepository business, SaleFailureLookup failures,
-                          Duration heartbeatGrace, Clock clock) {
+                          Duration heartbeatGrace, Duration clockTolerance, Clock clock) {
         this.terminals = terminals;
         this.reports = reports;
         this.business = business;
         this.failures = failures == null ? SaleFailureLookup.NONE : failures;
         this.heartbeatGrace = heartbeatGrace;
+        this.clockTolerance = clockTolerance;
         this.clock = clock;
     }
 
-    public void report(PosHeartbeat heartbeat) {
-        reports.report(heartbeat);
+    /**
+     * 보고를 받으면서 <b>시계 차이를 잽니다</b> (§3.5 System Date 동기화).
+     *
+     * <p>재는 쪽이 서버인 이유: POS가 스스로 "나는 30초 느리다"고 말할
+     * 수 있으면 애초에 틀어지지 않았을 것입니다. 기준은 서버 시각이고,
+     * POS는 자기가 몇 시라고 생각하는지만 말하면 됩니다.
+     *
+     * @return 차이를 채운 보고. 응답으로 POS에 돌려주면 POS가 스스로 맞춥니다.
+     */
+    public PosHeartbeat report(PosHeartbeat heartbeat) {
+        PosHeartbeat measured = heartbeat.measuredAgainst(clock.instant());
+        reports.report(measured);
+        return measured;
+    }
+
+    /** 이 초를 넘게 틀어진 시계는 손봐야 합니다. */
+    public Duration clockTolerance() {
+        return clockTolerance;
+    }
+
+    public Instant now() {
+        return clock.instant();
     }
 
     /**
@@ -159,11 +181,14 @@ public final class PosLiveService {
         axes.put(LiveAxis.DEVICE, device);
         axes.put(LiveAxis.DATA, data);
 
+        Integer drift = heard ? report.get().driftSeconds() : null;
+
         return new PosLiveView(storeId, posNo, axes, worst(axes.values()),
                 report.map(PosHeartbeat::programVersion).orElse(null),
                 report.map(PosHeartbeat::dbVersion).orElse(null),
+                drift,
                 report.map(PosHeartbeat::reportedAt).orElse(null),
-                mismatches(axes, failedSales));
+                mismatches(axes, failedSales, drift, clockTolerance));
     }
 
     /**
@@ -172,7 +197,8 @@ public final class PosLiveService {
      * <p>첫 항목이 이 화면이 존재하는 이유입니다 — 소켓은 붙어 있는데
      * 아무 말이 없는 단말. 연결만 보는 관제라면 이 단말은 초록색입니다.
      */
-    private static List<String> mismatches(Map<LiveAxis, AxisState> axes, long failedSales) {
+    private static List<String> mismatches(Map<LiveAxis, AxisState> axes, long failedSales,
+                                           Integer driftSeconds, Duration clockTolerance) {
         List<String> found = new ArrayList<>();
         AxisState connection = axes.get(LiveAxis.CONNECTION);
         AxisState application = axes.get(LiveAxis.APPLICATION);
@@ -192,6 +218,15 @@ public final class PosLiveService {
         }
         if (failedSales > 0) {
             found.add("분해되지 않은 매출이 " + failedSales + "건 있습니다");
+        }
+        // 시계는 축이 아니라 어긋남으로 냅니다. 여섯 번째 축을 만들면
+        // 문서에 없는 축이 하나 생기고, 시계가 틀어진 단말은 나머지 다섯
+        // 축이 전부 정상인 채로 매출만 다른 날로 갑니다 — 어긋남이라는
+        // 자리가 정확히 그런 것을 담으라고 있는 자리입니다.
+        if (driftSeconds != null && Math.abs(driftSeconds) > clockTolerance.toSeconds()) {
+            found.add("POS 시계가 " + Math.abs(driftSeconds) + "초 "
+                    + (driftSeconds > 0 ? "느립니다" : "빠릅니다")
+                    + " — 판매일자가 틀어질 수 있습니다");
         }
         return found;
     }

@@ -151,6 +151,24 @@ public final class PosOperationEndpoints {
         };
     }
 
+    /**
+     * {@code GET /pos/time} — 기준 시각 (§3.5 System Date 동기화).
+     *
+     * <p>Heartbeat 와 따로 있는 이유: 갓 켜진 POS는 아직 보고할 상태가
+     * 없는데 <b>시각은 그때 제일 필요합니다</b>. 부팅 직후의 시계가 제일
+     * 많이 틀어져 있고, 그 상태로 첫 거래를 끊으면 판매일자가 틀어집니다.
+     */
+    public RestEndpoint serverTime() {
+        return request -> {
+            Instant now = live.now();
+            return JsonResponses.of(HttpResponseStatus.OK, Map.of(
+                    "serverTime", now.toString(),
+                    "businessDate", LocalDate.now(STORE_ZONE).toString(),
+                    "zone", STORE_ZONE.getId(),
+                    "toleranceSeconds", live.clockTolerance().toSeconds()));
+        };
+    }
+
     /** {@code POST /pos/heartbeat} — POS의 주기적 자기 보고 (§3.5). */
     public RestEndpoint heartbeat() {
         return request -> {
@@ -168,12 +186,25 @@ public final class PosOperationEndpoints {
                         AxisState.reported(text(body, "data")),
                         text(body, "programVersion"), text(body, "dbVersion"),
                         body.hasNonNull("devices") ? body.get("devices").toString() : null,
+                        body.hasNonNull("posTime") ? Instant.parse(body.get("posTime").asText()) : null,
+                        null,
                         body.hasNonNull("reportedAt")
                                 ? Instant.parse(body.get("reportedAt").asText()) : Instant.now());
-                live.report(beat);
-                return JsonResponses.of(HttpResponseStatus.OK, Map.of(
-                        "storeId", beat.storeId(), "posNo", beat.posNo(),
-                        "reportedAt", beat.reportedAt().toString()));
+
+                PosHeartbeat measured = live.report(beat);
+
+                // 답에 서버 시각과 차이를 실어 보냅니다. POS가 그것을
+                // 보고 스스로 맞추면 되고, 그러면 시계 동기화에 따로
+                // 왕복이 필요 없습니다 — 어차피 주기적으로 오는 호출입니다.
+                Map<String, Object> answer = new LinkedHashMap<>();
+                answer.put("storeId", measured.storeId());
+                answer.put("posNo", measured.posNo());
+                answer.put("reportedAt", measured.reportedAt().toString());
+                answer.put("serverTime", live.now().toString());
+                answer.put("driftSeconds", measured.driftSeconds());
+                answer.put("clockOk", measured.driftSeconds() == null
+                        || Math.abs(measured.driftSeconds()) <= live.clockTolerance().toSeconds());
+                return JsonResponses.of(HttpResponseStatus.OK, answer);
             } catch (RuntimeException badShape) {
                 return badRequest(badShape.getMessage());
             }
@@ -208,6 +239,7 @@ public final class PosOperationEndpoints {
                 row.put("normal", view.normal());
                 row.put("programVersion", view.programVersion());
                 row.put("dbVersion", view.dbVersion());
+                row.put("clockDriftSeconds", view.clockDriftSeconds());
                 row.put("lastReportedAt", view.lastReportedAt());
                 row.put("mismatches", view.mismatches());
                 rows.add(row);

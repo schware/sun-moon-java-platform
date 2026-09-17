@@ -4,6 +4,7 @@ import com.sunmoon.platform.api.CreateOrderEndpoint;
 import com.sunmoon.platform.api.MenuProxyEndpoints;
 import com.sunmoon.platform.api.MasterEndpoints;
 import com.sunmoon.platform.api.PosOperationEndpoints;
+import com.sunmoon.platform.api.PosSystemEndpoints;
 import com.sunmoon.platform.api.SaleEndpoints;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
@@ -23,11 +24,16 @@ import com.sunmoon.platform.domain.sale.JsonSaleDecomposer;
 import com.sunmoon.platform.domain.sale.SaleDecomposeJob;
 import com.sunmoon.platform.domain.sale.SaleRepository;
 import com.sunmoon.platform.domain.pos.MasterDispatchService;
+import com.sunmoon.platform.domain.pos.NoticeService;
+import com.sunmoon.platform.domain.pos.ProgramDeployService;
 import com.sunmoon.platform.domain.pos.PosBusinessService;
 import com.sunmoon.platform.domain.pos.PosLiveService;
 import com.sunmoon.platform.infrastructure.pos.JdbcMasterRepository;
 import com.sunmoon.platform.infrastructure.pos.JdbcPosBusinessRepository;
+import com.sunmoon.platform.infrastructure.pos.JdbcNoticeRepository;
 import com.sunmoon.platform.infrastructure.pos.JdbcPosLiveRepository;
+import com.sunmoon.platform.infrastructure.pos.JdbcProgramRepository;
+import com.sunmoon.platform.infrastructure.pos.TerminalNoticeBroadcaster;
 import com.sunmoon.platform.infrastructure.sale.JdbcSaleRepository;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
@@ -110,9 +116,17 @@ public final class Bootstrap {
                 // 서버가 본 것: 그 매장 그 날 분해에 실패한 매출 건수.
                 // POS는 자기가 보낸 매출이 서버에서 깨졌는지 모릅니다.
                 (storeId, businessDate) -> sales.totals(storeId, businessDate).failed(),
-                config.heartbeatGrace(), java.time.Clock.systemUTC());
+                config.heartbeatGrace(), config.clockTolerance(), java.time.Clock.systemUTC());
         MasterDispatchService posMasters = salesDataSource == null ? null
                 : new MasterDispatchService(new JdbcMasterRepository(salesDataSource));
+        ProgramDeployService posPrograms = salesDataSource == null ? null
+                : new ProgramDeployService(new JdbcProgramRepository(salesDataSource));
+        // 긴급 메시지는 이 서버가 직접 받은 것이라 Redis 를 거치지
+        // 않습니다 — 자기 안에서 일어난 일을 한 바퀴 돌리면 Redis 가
+        // 죽은 날 이 서버만으로 할 수 있는 일까지 못 하게 됩니다.
+        NoticeService posNotices = salesDataSource == null ? null : new NoticeService(
+                new JdbcNoticeRepository(salesDataSource),
+                new TerminalNoticeBroadcaster(terminals), java.time.Clock.systemUTC());
 
         OrderClient orderClient = new OrderClient(config.orderServiceUrl());
         AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
@@ -121,7 +135,7 @@ public final class Bootstrap {
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales,
-                                posBusiness, posLive, posMasters),
+                                posBusiness, posLive, posMasters, posPrograms, posNotices),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -200,7 +214,8 @@ public final class Bootstrap {
     private static Map<RouteKey, RestEndpoint> apiRoutes(
             EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient,
             AppServerClient appServerClient, SaleRepository sales,
-            PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters) {
+            PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
+            ProgramDeployService posPrograms, NoticeService posNotices) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
@@ -209,6 +224,8 @@ public final class Bootstrap {
         PosOperationEndpoints posEndpoints = posBusiness == null ? null
                 : new PosOperationEndpoints(posBusiness, posLive);
         MasterEndpoints masterEndpoints = posMasters == null ? null : new MasterEndpoints(posMasters);
+        PosSystemEndpoints systemEndpoints = posPrograms == null ? null
+                : new PosSystemEndpoints(posPrograms, posNotices);
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
@@ -264,6 +281,33 @@ public final class Bootstrap {
                         masterEndpoints == null ? noPosStore() : masterEndpoints.bumpVersion()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/pos/masters/pending"),
                         masterEndpoints == null ? noPosStore() : masterEndpoints.pending()),
+
+                // System Date 동기화 (§3.5). 갓 켜진 POS는 보고할 상태가
+                // 없는데 시각은 그때 제일 필요합니다.
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/time"),
+                        posEndpoints == null ? noPosStore() : posEndpoints.serverTime()),
+
+                // 프로그램 배포 (§3.5). 마스터와 같은 규칙 — 깔린 버전은
+                // 장비가 말해야 올라갑니다.
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/programs"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.programPlan()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/programs/release"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.publishRelease()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/programs/ack"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.programAck()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/programs/status"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.programStatus()),
+
+                // 공지·긴급 메시지 (§3.5). 먼저 적고 그다음에 밉니다 —
+                // 밀기만 하면 그때 꺼져 있던 장비는 영영 모릅니다.
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/notices"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.activeNotices()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/notices/all"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.allNotices()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/notices"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.publishNotice()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/notices/ack"),
+                        systemEndpoints == null ? noPosStore() : systemEndpoints.acknowledgeNotice()),
 
                 // The terminal's local master: what this store sells today
                 // and what it has run out of. Read from APP-SERVER, which
