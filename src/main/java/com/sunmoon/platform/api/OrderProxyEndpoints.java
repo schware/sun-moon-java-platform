@@ -128,6 +128,34 @@ public final class OrderProxyEndpoints {
     }
 
     /**
+     * {@code POST /orders/recall?id=1} — 번호를 다시 부릅니다.
+     *
+     * <p>DID가 흐르는 화면이라 필요한 자리입니다: 조리가 끝난 번호가
+     * 잠깐 떴다가 지나가고, 그 뒤에 온 손님에게는 다시 띄워 줘야 합니다.
+     * 누르는 곳은 KDS이고 뜨는 곳은 DID라, 둘 사이의 사실은 Order 가
+     * 들고 있습니다.
+     */
+    public RestEndpoint recall() {
+        return request -> {
+            String rawId = param(request.uri(), "id");
+            if (rawId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id is required"));
+            }
+            long orderId;
+            try {
+                orderId = Long.parseLong(rawId);
+            } catch (NumberFormatException notANumber) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
+            }
+            try {
+                return passThrough(orders.recall(orderId));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
+    /**
      * {@code POST /orders/received?id=1&deviceId=pos-01}
      *
      * <p>POS가 주문을 받아 저장했다고 알리는 자리. 상태 전이가 아니라

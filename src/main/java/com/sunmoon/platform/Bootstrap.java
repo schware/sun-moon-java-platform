@@ -243,6 +243,10 @@ public final class Bootstrap {
                 // 전이와 따로인 이유는 번호 검사가 붙어 있기 때문입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/pickup"), orderEndpoints.handOver()),
 
+                // 재호출 — DID에 번호를 다시 띄웁니다. 상태 전이가
+                // 아닙니다: 한 번 부르든 다섯 번 부르든 PRODUCED 입니다.
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/recall"), orderEndpoints.recall()),
+
                 // POS 수신 완료 — 상태 전이가 아니라 전달 사실입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/received"), orderEndpoints.markReceived()),
 

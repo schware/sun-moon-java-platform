@@ -77,6 +77,18 @@ public final class OrderClient {
                 .POST(HttpRequest.BodyPublishers.ofString(body)));
     }
 
+    /**
+     * {@code POST /orders/{id}/recall} — 번호를 다시 부릅니다.
+     *
+     * <p>본문이 없습니다. 부르는 데 필요한 것은 어느 주문인가뿐이고,
+     * 누가 눌렀는지는 KDS 한 대뿐인 매장에서 답이 정해져 있습니다 —
+     * 여러 대가 되는 날 붙이면 됩니다.
+     */
+    public HttpResponse<String> recall(long orderId) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/recall"))
+                .POST(HttpRequest.BodyPublishers.noBody()));
+    }
+
     /** null 은 JSON null 로, 값은 따옴표로. 이 두 필드에 따옴표가 들어올 일은 없습니다. */
     private static String json(String value) {
         return value == null ? "null" : "\"" + value.replace("\"", "") + "\"";
