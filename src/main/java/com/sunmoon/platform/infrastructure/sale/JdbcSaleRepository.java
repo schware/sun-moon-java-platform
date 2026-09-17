@@ -70,7 +70,7 @@ public final class JdbcSaleRepository implements SaleRepository {
                 SELECT id, store_id, pos_no, business_date, tran_no, content_type, payload,
                        status, error, attempts, received_at, decomposed_at
                   FROM tr_sale_log
-                 WHERE status <> 'DECOMPOSED'
+                 WHERE status = 'RECEIVED'
                  ORDER BY received_at
                  LIMIT ?
                 """;
