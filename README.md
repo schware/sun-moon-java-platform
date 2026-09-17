@@ -100,6 +100,10 @@ Docker approach ever needs to be un-done.
 - [`docs/adr/0011`](docs/adr/0011-sold-out-and-the-pickup-number.md)
   — 결품 is keyed by 판매일자 so 개점 clears it with no batch to forget, and
   수령번호 is two values with two jobs (부르는 번호 / 증명하는 번호).
+- [`docs/adr/0012`](docs/adr/0012-app-server-owns-the-customer-order-ledger.md)
+  — APP-SERVER keeps its own order ledger because "what the customer asked
+  for" and "what the store was given to make" are different records; the
+  screen mints the idempotency key, and 거절 is not 못 닿음.
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
