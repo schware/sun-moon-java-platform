@@ -170,7 +170,51 @@ destination, not an origin. Live check afterwards: QR 2 / APP 0, and
 rejected and send-failed orders became visible for the first time — they
 had never appeared in a 매출 view at all.
 
+## Addendum, 2026-09-18: 장바구니 — 주문 하나에 메뉴 여럿
+
+The ledger was built with `app_order_detail` from the start, and until
+today **nothing could put more than one row in it**. `PlaceAppOrder` took
+a single `menuId`; `HttpOmsGateway` sent `lines.get(0).menuName()` and
+dropped the rest. A customer ordering two things got two orders, two
+pickup numbers and two transaction numbers — one customer in the shop,
+two in the system.
+
+The interesting part was not adding a list. It was what the list forced:
+
+**가격이 요청에서 사라졌습니다.** There is no price field in
+`PlaceAppOrder.Item` at all — only `menuId` and `quantity`. A price the
+browser sends is a price the customer can edit, and the customer had a
+whole menu board to choose it from. The server re-reads it from that
+store's board for that 판매일자, which also settles the other question:
+prices change while someone is choosing, and the right one is the price
+at the moment the order is accepted.
+
+**결품이면 어느 줄인지 말합니다.** With five lines in a cart, "주문할 수
+없습니다" leaves the customer removing items one at a time to find out
+which. And one blocked line refuses the **whole** order — half a cart
+arriving at the shop means the customer receives food they did not order.
+
+**같은 메뉴 두 줄은 합치지 않습니다.** They will differ one day (하나는
+맵게), and a merge cannot be undone afterwards.
+
+Order gained `OrderLine` in the same change, and `menuName`/`amount` there
+changed meaning rather than disappearing: they are now the order's *name*
+("짜장면 외 1건") and the *sum*, both derived from the lines. Nothing was
+deleted because POS/KDS/DID/BO all draw those fields and pre-2026-09-18
+orders have no lines at all.
+
+**옛 주문에 줄을 지어 넣지 않았습니다.** Backfilling one line each would
+make "an order that had lines" and "an order that was one line"
+indistinguishable forever. Screens fall back to the old field when the
+list is empty.
+
 ## Open
 
 - 외부 채널 주문번호 (`EXTERNAL_ORDER_NO`) — the map table gains a column
   when a channel exists.
+- **한 주문의 메뉴가 서로 다른 주방으로 가는 경우** (중식과 일식을 같이
+  파는 매장). 지금은 첫 줄의 주방을 씁니다. 주문 하나에 주방이 하나라는
+  전제가 Order 의 `kdsDeviceId` 에도 있어서, 갈라야 하는 날 **주문을
+  쪼갤지 줄마다 주방을 달지**부터 정해야 합니다.
+- **결제가 없습니다.** `app_order_payment` 는 표만 있고 행이 0입니다.
+  장바구니가 붙은 지금, 다음으로 큰 구멍입니다.

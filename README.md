@@ -104,12 +104,21 @@ Docker approach ever needs to be un-done.
   — APP-SERVER keeps its own order ledger because "what the customer asked
   for" and "what the store was given to make" are different records; the
   screen mints the idempotency key, and 거절 is not 못 닿음.
+- [`docs/adr/0014`](docs/adr/0014-master-screens-are-definitions-not-code.md)
+  — 기준정보 화면은 코드가 아니라 정의다. 정의 한 줄이 화면 하나이고,
+  감사로그는 한 곳을 지나가므로 한 번만 만들면 전부에 붙는다. 무엇에 쓰고
+  **무엇에 안 쓰는가**가 이 구조의 실제 결정이다.
 - [`docs/adr/0013`](docs/adr/0013-pos-server-becomes-a-system-of-record.md)
   — POS-Server starts holding facts: 매출 원본과 분해, 단말 단위 개점·마감
   (재개점은 서버가 판단하고 지나간 전문은 상태를 못 바꾼다), Live Check 5종,
   마스터 배포(적용 버전은 장비가 말해야 올라간다). 추가분(09-18): §3.5 의 나머지
   — 시계는 서버가 재고, 프로그램 버전은 이름이라 되돌리기가 그냥 새 배포이며,
   긴급 메시지는 먼저 적고 그다음에 민다. 그리고 그것을 볼 BO 화면 넷.
+
+> **다음에 이어서 하려면** [`docs/HANDOFF-2026-09-18.md`](docs/HANDOFF-2026-09-18.md)
+> 부터 읽으십시오 — 지금 어디까지 왔고 다음에 무엇을 집을지, 그리고
+> "모든 것을 공통으로"라는 방향을 어디에 쓰고 어디에 쓰면 안 되는지가
+> 정리돼 있습니다.
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
