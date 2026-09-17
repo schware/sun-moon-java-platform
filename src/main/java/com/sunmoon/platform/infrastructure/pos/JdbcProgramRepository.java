@@ -244,6 +244,29 @@ public final class JdbcProgramRepository implements ProgramRepository {
         }
     }
 
+    @Override
+    public boolean clearFailure(String storeId, String deviceType, String deviceNo, String program) {
+        // status 는 OFFERED 로 되돌립니다. 마스터와 다른 점: 프로그램은
+        // 실패했다는 것 자체가 이미 "내려줬다"는 뜻이라, OFFERED 가
+        // 거짓말이 아닙니다.
+        String sql = """
+                UPDATE pos_program_install
+                   SET last_error = NULL, status = 'OFFERED'
+                 WHERE store_id = ? AND device_type = ? AND device_no = ?
+                   AND program = ? AND status = 'FAILED'
+                """;
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, storeId);
+            ps.setString(2, deviceType);
+            ps.setString(3, deviceNo);
+            ps.setString(4, program);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("프로그램 재처리를 걸지 못했습니다", e);
+        }
+    }
+
     private static final String INSTALL_SELECT = """
             SELECT store_id, device_type, device_no, program, installed_version,
                    target_version, status, attempts, last_error, offered_at, installed_at

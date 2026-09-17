@@ -39,4 +39,15 @@ public interface ProgramRepository {
     List<ProgramInstall> unfinished(String storeId);
 
     Optional<ProgramInstall> find(String storeId, String deviceType, String deviceNo, String program);
+
+    /**
+     * 실패 표시를 지워 다시 받아야 할 것으로 되돌립니다 (§5.8).
+     *
+     * <p>마스터와 같습니다 — 장비가 가져가는 구조라 서버가 밀 수 없고,
+     * 실제 재설치는 그 장비가 다음에 물어볼 때 일어납니다.
+     *
+     * <p>깔린 버전은 건드리지 않습니다. 설치에 실패했다고 전에 깔려
+     * 있던 것이 사라진 것은 아닙니다.
+     */
+    boolean clearFailure(String storeId, String deviceType, String deviceNo, String program);
 }

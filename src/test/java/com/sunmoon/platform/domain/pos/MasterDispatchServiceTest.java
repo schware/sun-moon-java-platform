@@ -244,5 +244,18 @@ class MasterDispatchServiceTest {
                                              MasterType masterType) {
             return Optional.ofNullable(dispatches.get(key(storeId, deviceType, deviceNo, masterType)));
         }
+
+        @Override
+        public boolean clearFailure(String storeId, String deviceType, String deviceNo,
+                                    MasterType masterType) {
+            MasterDispatch found = dispatches.get(key(storeId, deviceType, deviceNo, masterType));
+            if (found == null || found.status() != MasterDispatch.Status.FAILED) {
+                return false;
+            }
+            dispatches.put(key(storeId, deviceType, deviceNo, masterType), new MasterDispatch(
+                    storeId, deviceType, deviceNo, masterType, found.appliedVersion(),
+                    found.status(), found.attempts(), null, found.sentAt(), found.appliedAt()));
+            return true;
+        }
     }
 }

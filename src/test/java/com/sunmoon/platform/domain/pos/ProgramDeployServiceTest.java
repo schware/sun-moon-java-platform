@@ -287,5 +287,18 @@ class ProgramDeployServiceTest {
                                              String program) {
             return Optional.ofNullable(installs.get(key(storeId, deviceType, deviceNo, program)));
         }
+
+        @Override
+        public boolean clearFailure(String storeId, String deviceType, String deviceNo, String program) {
+            String k = key(storeId, deviceType, deviceNo, program);
+            ProgramInstall found = installs.get(k);
+            if (found == null || found.status() != ProgramInstall.Status.FAILED) {
+                return false;
+            }
+            installs.put(k, new ProgramInstall(storeId, deviceType, deviceNo, program,
+                    found.installedVersion(), found.targetVersion(), ProgramInstall.Status.OFFERED,
+                    found.attempts(), null, found.offeredAt(), found.installedAt()));
+            return true;
+        }
     }
 }

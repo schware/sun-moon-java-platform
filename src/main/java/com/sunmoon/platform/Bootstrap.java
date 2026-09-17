@@ -5,6 +5,7 @@ import com.sunmoon.platform.api.MenuProxyEndpoints;
 import com.sunmoon.platform.api.MasterEndpoints;
 import com.sunmoon.platform.api.PosOperationEndpoints;
 import com.sunmoon.platform.api.PosSystemEndpoints;
+import com.sunmoon.platform.api.ReprocessEndpoints;
 import com.sunmoon.platform.api.SaleEndpoints;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
@@ -22,6 +23,10 @@ import com.sunmoon.platform.core.ListenerSpec;
 import com.sunmoon.platform.domain.order.OrderRepository;
 import com.sunmoon.platform.domain.sale.JsonSaleDecomposer;
 import com.sunmoon.platform.domain.sale.SaleDecomposeJob;
+import com.sunmoon.platform.domain.reprocess.MasterReprocessor;
+import com.sunmoon.platform.domain.reprocess.ProgramReprocessor;
+import com.sunmoon.platform.domain.reprocess.ReprocessService;
+import com.sunmoon.platform.domain.reprocess.SaleReprocessor;
 import com.sunmoon.platform.domain.sale.SaleRepository;
 import com.sunmoon.platform.domain.pos.MasterDispatchService;
 import com.sunmoon.platform.domain.pos.NoticeService;
@@ -128,6 +133,13 @@ public final class Bootstrap {
                 new JdbcNoticeRepository(salesDataSource),
                 new TerminalNoticeBroadcaster(terminals), java.time.Clock.systemUTC());
 
+        // 실패를 되돌리는 자리 (§5.8). 세 종류가 저장소는 다르지만
+        // 운영자가 묻는 것은 하나라, 한 곳을 지나갑니다.
+        ReprocessService reprocess = salesDataSource == null ? null : new ReprocessService(java.util.List.of(
+                new SaleReprocessor(sales),
+                new MasterReprocessor(new JdbcMasterRepository(salesDataSource)),
+                new ProgramReprocessor(new JdbcProgramRepository(salesDataSource))));
+
         OrderClient orderClient = new OrderClient(config.orderServiceUrl());
         AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
         subscribeToEvents(config, terminals, orderClient);
@@ -135,7 +147,8 @@ public final class Bootstrap {
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales,
-                                posBusiness, posLive, posMasters, posPrograms, posNotices),
+                                posBusiness, posLive, posMasters, posPrograms, posNotices,
+                                reprocess),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -215,7 +228,8 @@ public final class Bootstrap {
             EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient,
             AppServerClient appServerClient, SaleRepository sales,
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
-            ProgramDeployService posPrograms, NoticeService posNotices) {
+            ProgramDeployService posPrograms, NoticeService posNotices,
+            ReprocessService reprocess) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
@@ -226,6 +240,8 @@ public final class Bootstrap {
         MasterEndpoints masterEndpoints = posMasters == null ? null : new MasterEndpoints(posMasters);
         PosSystemEndpoints systemEndpoints = posPrograms == null ? null
                 : new PosSystemEndpoints(posPrograms, posNotices);
+        ReprocessEndpoints reprocessEndpoints = reprocess == null ? null
+                : new ReprocessEndpoints(reprocess);
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
@@ -285,6 +301,16 @@ public final class Bootstrap {
                         masterEndpoints == null ? noPosStore() : masterEndpoints.bumpVersion()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/pos/masters/pending"),
                         masterEndpoints == null ? noPosStore() : masterEndpoints.pending()),
+
+                // 재처리 (§5.8). 매출 분해·마스터 적용·프로그램 설치 —
+                // 세 종류가 저장소는 달라도 사람이 묻는 것은 하나입니다:
+                // 지금 손봐야 할 것이 있나.
+                Map.entry(new RouteKey(HttpMethod.GET, "/reprocess"),
+                        reprocessEndpoints == null ? noPosStore() : reprocessEndpoints.list()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/reprocess/one"),
+                        reprocessEndpoints == null ? noPosStore() : reprocessEndpoints.retryOne()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/reprocess/all"),
+                        reprocessEndpoints == null ? noPosStore() : reprocessEndpoints.retryAll()),
 
                 // System Date 동기화 (§3.5). 갓 켜진 POS는 보고할 상태가
                 // 없는데 시각은 그때 제일 필요합니다.

@@ -39,6 +39,27 @@ public interface SaleRepository {
     /** 분해에 실패했습니다. 원본은 그대로 두고 사유만 적습니다. */
     void markFailed(long logId, String error);
 
+    /**
+     * 분해에 실패해 있는 원본들.
+     *
+     * <p>{@link #pending} 과 다릅니다 — 저건 "아직 안 한 것"이고 이건
+     * "해 봤는데 안 된 것"입니다. 앞은 배치가 알아서 집어 가지만 뒤는
+     * 사람이 봐야 합니다.
+     */
+    List<SaleLog> failed(String storeId);
+
+    /**
+     * 다시 분해하게 되돌립니다 (§5.8 재처리).
+     *
+     * <p>사유를 <b>지우지 않습니다</b>. 다시 돌려서 또 실패하면 새 사유가
+     * 덮어쓰고, 성공하면 분해가 지웁니다 — 그 사이에 화면을 여는 사람은
+     * "무엇 때문에 다시 돌린 건인지"를 볼 수 있어야 합니다.
+     *
+     * <p>시도 횟수도 그대로 둡니다. 세 번째 재처리라는 사실이 "이건
+     * 사람이 봐야 한다"는 신호입니다.
+     */
+    boolean markForRetry(long logId);
+
     /** 그 날 그 매장의 분해된 매출 건수·금액 — 정합성 확인용 (§3.2). */
     Totals totals(String storeId, java.time.LocalDate businessDate);
 

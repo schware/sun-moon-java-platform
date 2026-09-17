@@ -235,6 +235,58 @@ public final class JdbcSaleRepository implements SaleRepository {
     }
 
     @Override
+    public List<SaleLog> failed(String storeId) {
+        String sql = """
+                SELECT id, store_id, pos_no, business_date, tran_no, content_type, payload,
+                       status, error, attempts, received_at, decomposed_at
+                  FROM tr_sale_log
+                 WHERE status = 'FAILED' AND (? IS NULL OR store_id = ?)
+                 ORDER BY received_at
+                 LIMIT 200
+                """;
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, storeId);
+            ps.setString(2, storeId);
+            try (ResultSet rs = ps.executeQuery()) {
+                List<SaleLog> logs = new ArrayList<>();
+                while (rs.next()) {
+                    logs.add(new SaleLog(
+                            rs.getLong("id"), rs.getString("store_id"), rs.getString("pos_no"),
+                            rs.getObject("business_date", LocalDate.class), rs.getString("tran_no"),
+                            rs.getString("content_type"), rs.getBytes("payload"),
+                            SaleLog.Status.valueOf(rs.getString("status")), rs.getString("error"),
+                            rs.getInt("attempts"),
+                            instant(rs.getTimestamp("received_at")),
+                            instant(rs.getTimestamp("decomposed_at"))));
+                }
+                return logs;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("실패한 매출 목록을 읽지 못했습니다", e);
+        }
+    }
+
+    /**
+     * FAILED 를 RECEIVED 로 되돌립니다 — 배치가 다음 회차에 집어 갑니다.
+     *
+     * <p>{@code status = 'FAILED'} 조건이 붙어 있는 것이 중요합니다.
+     * 이미 분해된 건을 되돌리면 멀쩡한 매출이 다시 풀리고, 그 사이에
+     * 조회하면 없는 것처럼 보입니다.
+     */
+    @Override
+    public boolean markForRetry(long logId) {
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(
+                     "UPDATE tr_sale_log SET status = 'RECEIVED' WHERE id = ? AND status = 'FAILED'")) {
+            ps.setLong(1, logId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("매출 재처리를 걸지 못했습니다", e);
+        }
+    }
+
+    @Override
     public void markFailed(long logId, String error) {
         String sql = """
                 UPDATE tr_sale_log

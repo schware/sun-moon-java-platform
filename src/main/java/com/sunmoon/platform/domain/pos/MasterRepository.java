@@ -32,4 +32,17 @@ public interface MasterRepository {
     List<MasterDispatch> unfinished(String storeId);
 
     Optional<MasterDispatch> find(String storeId, String deviceType, String deviceNo, MasterType masterType);
+
+    /**
+     * 실패 표시를 지워 <b>다시 받아야 할 것</b>으로 되돌립니다 (§5.8).
+     *
+     * <p>여기서 할 수 있는 것이 이것까지입니다 — 마스터는 <b>장비가
+     * 가져갑니다</b>. 서버가 밀 수 없으므로 실제 재전송은 그 장비가 다음에
+     * 물어볼 때 일어나고, 화면은 그 사실을 말해 줘야 합니다.
+     *
+     * <p>적용 버전은 건드리지 않습니다. 실패했다고 장비가 뭔가를 잃은
+     * 것이 아니라 <b>앞으로 못 간 것</b>이라, 여전히 그 전 버전을
+     * 들고 있습니다.
+     */
+    boolean clearFailure(String storeId, String deviceType, String deviceNo, MasterType masterType);
 }

@@ -196,6 +196,30 @@ public final class JdbcMasterRepository implements MasterRepository {
         }
     }
 
+    @Override
+    public boolean clearFailure(String storeId, String deviceType, String deviceNo,
+                                MasterType masterType) {
+        // status 를 SENT 로 되돌리지 않습니다 — 보낸 적이 없을 수도
+        // 있고, 그러면 "보냈는데 답이 없음"이라는 거짓말이 됩니다.
+        // 사유만 지우고 상태는 그대로 둡니다.
+        String sql = """
+                UPDATE pos_master_dispatch
+                   SET last_error = NULL
+                 WHERE store_id = ? AND device_type = ? AND device_no = ?
+                   AND master_type = ? AND status = 'FAILED'
+                """;
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, storeId);
+            ps.setString(2, deviceType);
+            ps.setString(3, deviceNo);
+            ps.setString(4, masterType.name());
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IllegalStateException("마스터 재처리를 걸지 못했습니다", e);
+        }
+    }
+
     private static final String SELECT = """
             SELECT store_id, device_type, device_no, master_type, applied_version,
                    status, attempts, last_error, sent_at, applied_at
