@@ -114,8 +114,13 @@ public final class OrderProxyEndpoints {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
             }
             try {
+                // 강제 진행은 이 서버가 판단하지 않고 넘기기만 합니다 —
+                // 번호를 볼지 말지는 Order 의 규칙이고, 여기서 한 번 더
+                // 거르면 같은 규칙이 두 곳에 생깁니다.
+                boolean override = "true".equalsIgnoreCase(param(request.uri(), "override"));
                 return passThrough(orders.handOver(
-                        orderId, param(request.uri(), "pin"), param(request.uri(), "deviceId")));
+                        orderId, param(request.uri(), "pin"),
+                        param(request.uri(), "deviceId"), override));
             } catch (Exception e) {
                 return unreachable(e);
             }

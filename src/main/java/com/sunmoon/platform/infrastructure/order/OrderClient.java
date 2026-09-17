@@ -68,8 +68,10 @@ public final class OrderClient {
      * 없습니다. 403(번호 불일치)과 409(아직/이미)가 서로 다른 답이고,
      * 둘 다 그대로 단말에 전달됩니다.
      */
-    public HttpResponse<String> handOver(long orderId, String pin, String deviceId) throws Exception {
-        String body = "{\"pin\":" + json(pin) + ",\"deviceId\":" + json(deviceId) + "}";
+    public HttpResponse<String> handOver(long orderId, String pin, String deviceId, boolean override)
+            throws Exception {
+        String body = "{\"pin\":" + json(pin) + ",\"deviceId\":" + json(deviceId)
+                + ",\"override\":" + override + "}";
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/pickup"))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)));
