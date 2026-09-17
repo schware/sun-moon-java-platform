@@ -2,6 +2,7 @@ package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.CreateOrderEndpoint;
 import com.sunmoon.platform.api.MenuProxyEndpoints;
+import com.sunmoon.platform.api.SaleEndpoints;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
 import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
@@ -16,6 +17,10 @@ import com.sunmoon.platform.batch.OrderSummaryReport;
 import com.sunmoon.platform.core.CoreRuntime;
 import com.sunmoon.platform.core.ListenerSpec;
 import com.sunmoon.platform.domain.order.OrderRepository;
+import com.sunmoon.platform.domain.sale.JsonSaleDecomposer;
+import com.sunmoon.platform.domain.sale.SaleDecomposeJob;
+import com.sunmoon.platform.domain.sale.SaleRepository;
+import com.sunmoon.platform.infrastructure.sale.JdbcSaleRepository;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.MenuEventSubscriber;
@@ -65,7 +70,13 @@ public final class Bootstrap {
     public static void main(String[] args) throws Exception {
         PlatformConfig config = PlatformConfig.fromEnv();
 
-        OrderRepository orders = buildOrderRepository();
+        // 매출 원본을 담을 곳. POSTGRES_JDBC_URL 이 없으면 null 이고,
+        // /sales 는 503으로 그 사실을 말합니다 — 조용히 404를 내면
+        // POS가 주소를 잘못 쓴 줄 알고 영원히 재시도합니다.
+        DataSource salesDataSource = buildDataSource();
+        SaleRepository sales = salesDataSource == null ? null : new JdbcSaleRepository(salesDataSource);
+
+        OrderRepository orders = buildOrderRepository(salesDataSource);
         EventPublisher eventPublisher = new InMemoryEventPublisher();
 
         // The composition root owns the worker pool endpoints run on (docs/adr/0010),
@@ -86,11 +97,12 @@ public final class Bootstrap {
 
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
-                        apiRoutes(eventPublisher, terminals, orderClient, appServerClient),
+                        apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(orders);
+        scheduleSaleDecomposition(sales);
 
         new CoreRuntime(listeners).start();
     }
@@ -131,18 +143,27 @@ public final class Bootstrap {
      * keep in sync, and a machine with only a JDK still runs the whole
      * platform on in-memory fakes (docs/adr/0003, docs/adr/0005).
      */
-    private static OrderRepository buildOrderRepository() {
+    private static DataSource buildDataSource() {
         if (System.getenv("POSTGRES_JDBC_URL") == null) {
             log.info("POSTGRES_JDBC_URL not set — using in-memory fake repositories");
-            return new InMemoryOrderRepository();
+            return null;
         }
-
         PostgresConnectionSettings settings = PostgresConnectionSettings.fromEnv();
         DataSource dataSource = MyBatisConfig.buildDataSource(settings);
+        // 마이그레이션은 여기서 한 번만 돕니다. 주문과 매출이 같은
+        // 데이터베이스를 쓰므로, 두 곳에서 부르면 Flyway 가 같은 이력을
+        // 두 번 보게 됩니다.
         FlywayMigrator.migrate(dataSource);
+        log.info("POSTGRES_JDBC_URL set — using PostgreSQL ({})", settings.jdbcUrl());
+        return dataSource;
+    }
+
+    private static OrderRepository buildOrderRepository(DataSource dataSource) {
+        if (dataSource == null) {
+            return new InMemoryOrderRepository();
+        }
         // This runtime's mappers, passed in — the kernel lists no domain (docs/adr/0014).
         SqlSessionFactory sqlSessionFactory = MyBatisConfig.buildSqlSessionFactory(dataSource, OrderMapper.class);
-        log.info("POSTGRES_JDBC_URL set — using PostgreSQL repositories ({})", settings.jdbcUrl());
         return new MyBatisOrderRepository(sqlSessionFactory);
     }
 
@@ -154,11 +175,12 @@ public final class Bootstrap {
      */
     private static Map<RouteKey, RestEndpoint> apiRoutes(
             EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient,
-            AppServerClient appServerClient) {
+            AppServerClient appServerClient, SaleRepository sales) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
         MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
+        SaleEndpoints saleEndpoints = sales == null ? null : new SaleEndpoints(sales);
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
@@ -178,6 +200,14 @@ public final class Bootstrap {
 
                 // POS 수신 완료 — 상태 전이가 아니라 전달 사실입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/received"), orderEndpoints.markReceived()),
+
+                // POS 매출 — 이 서버가 처음으로 갖는 자기 업무입니다
+                // (업무 정의서 §3.1~3.2). 받기만 하고 풀지 않습니다:
+                // POS는 손님을 세워 두고 기다립니다.
+                Map.entry(new RouteKey(HttpMethod.POST, "/sales"),
+                        saleEndpoints == null ? noSaleStore() : saleEndpoints.receive()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/sales/totals"),
+                        saleEndpoints == null ? noSaleStore() : saleEndpoints.totals()),
 
                 // The terminal's local master: what this store sells today
                 // and what it has run out of. Read from APP-SERVER, which
@@ -225,6 +255,34 @@ public final class Bootstrap {
             // down would take the screens with it.
             log.error("could not subscribe to events — terminals will not be nudged", e);
         }
+    }
+
+    /**
+     * 매출 저장소가 없을 때의 답.
+     *
+     * <p>404가 아니라 503인 이유: 주소는 맞고 <b>서버가 아직 그 일을
+     * 할 수 없는</b> 상태입니다. 404를 내면 POS가 주소를 잘못 쓴 줄
+     * 알고, 조용히 영원히 재시도하거나 사람이 엉뚱한 곳을 고칩니다.
+     */
+    private static RestEndpoint noSaleStore() {
+        return request -> com.sunmoon.platform.transport.http.JsonResponses.of(
+                io.netty.handler.codec.http.HttpResponseStatus.SERVICE_UNAVAILABLE,
+                Map.of("error", "매출 저장소가 설정되지 않았습니다 (POSTGRES_JDBC_URL)"));
+    }
+
+    /**
+     * 쌓인 매출 원본을 주기적으로 풉니다 (업무 정의서 §3.2).
+     *
+     * <p>받는 것과 따로 도는 이유: POS는 매장에서 손님을 세워 두고
+     * 기다립니다. 분해가 느리다고 수신이 느려지면 안 됩니다.
+     */
+    private static void scheduleSaleDecomposition(SaleRepository sales) throws Exception {
+        if (sales == null) {
+            log.info("매출 저장소가 없어 분해 배치를 걸지 않습니다");
+            return;
+        }
+        SaleDecomposeJob job = new SaleDecomposeJob(sales, new JsonSaleDecomposer(), 200);
+        new BatchScheduler().scheduleEvery("tr-sale-decompose", 30, job::run);
     }
 
     private static void runStartupBatchJob(OrderRepository orderRepository) throws Exception {
