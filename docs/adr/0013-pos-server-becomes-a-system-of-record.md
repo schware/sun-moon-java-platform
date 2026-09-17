@@ -190,16 +190,99 @@ sockets on 2026-09-13.
   The device fetches the content separately. One round trip more, but the
   store's line does not carry every master on every check.
 
+## Addendum, 2026-09-18: the rest of §3.5, and somewhere to look at it
+
+Three items of §3.5 were listed as open and are now built, plus the BO
+screens that were the other half of the same gap.
+
+### System Date 동기화 — measured, not reported
+
+The heartbeat carries `posTime`, the POS's own idea of the clock, and the
+server computes the drift. The measuring has to happen server-side for a
+reason that sounds circular but is not: a POS that could tell you it is 30
+seconds slow would not be 30 seconds slow. The reference is the server; the
+terminal only says what time it thinks it is.
+
+The drift rides back on the heartbeat's response, so correction needs no
+extra round trip — the call is already periodic. `GET /pos/time` exists
+separately for the case that matters most: a POS that has just booted has no
+state to report yet, and that is exactly when its clock is furthest off.
+
+**We did not add a sixth axis.** A terminal with a wrong clock can be green
+on all five — and its sales still land on the wrong 판매일자 (ADR-0006).
+Drift surfaces as a mismatch, which is the slot for precisely that: a fact
+the axes do not carry. Tolerance is `POS_CLOCK_TOLERANCE`, 30s by default —
+a few seconds on a receipt is invisible, a minute near midnight moves money
+to another day.
+
+### 프로그램 배포 — the master rules, with two differences
+
+Same load-bearing rule as §3.6: **the installed version rises only when the
+device says so**. Two things differ:
+
+1. **Versions are names, not numbers** (`1.4.2`), so nothing is compared for
+   size. Current means *most recently released*, and a device holding
+   anything else is a target. Rolling back therefore needs no special code —
+   re-releasing 1.4.1 makes the devices on 1.4.2 targets, by the same rule.
+2. **There is a middle state.** `DOWNLOADED` exists because failing to fetch
+   and failing to install are different faults: the first is the line or the
+   file URL, the second is the device. Collapsed into one, you find out which
+   by driving to the shop.
+
+A store-specific release beats a global one. Rolling one shop first is the
+normal shape of a deployment, and a global release overriding it would make
+the trial meaningless.
+
+### 공지 및 긴급 메시지 — write first, then push
+
+The document suggests WebSocket for urgent messages. Push alone is not
+enough: a terminal that was off at that moment would never learn of it. So
+the order is fixed — **store, then push**. A failed push still leaves the
+message, and the device reads it on its next poll. Reversed, a message could
+succeed at pushing and fail at storing, which is the one genuinely bad
+outcome: seen by someone, known to no one.
+
+Urgent messages do not go through Redis, unlike 결품 and order events. Those
+originate in *other services* and have to cross a channel; this one arrives
+at this server directly. Routing it out and back would mean losing, on the
+day Redis is down, something this server could have done by itself.
+
+Only urgent messages count acknowledgements. Ordinary notices are never
+acknowledged, and a `0` next to one reads as a problem.
+
+### BO finally has somewhere to look
+
+Four screens — 개점 현황, Live Check, 배포 현황, 단말 공지 — behind
+`/api/pos-ops/*`. **BO does not own any of it.** Every value is read from
+POS-Server; only three writes start with a person in BO (bump a master
+version, publish a release, post a notice). A cached copy in BO would be
+faster and would eventually disagree with the source, and on that day nobody
+could say which was right.
+
+Two deliberate choices in those screens:
+
+- **The plan endpoints are read-only from BO.** `/pos/masters` and
+  `/pos/programs` take an `issue=true` that records a send; BO never passes
+  it. Otherwise opening a monitoring screen would stamp a send time on a
+  master nobody sent, and the retry counter would become a count of how many
+  times a human opened a page.
+- **`SENT` is not green.** The deploy screen colours it amber, because
+  "sent" is not a healthy end state — it is *not yet known*. Colouring it
+  like success would hide exactly the devices this screen exists to find.
+
+Permissions split four ways rather than one. Bundled, anyone who can post a
+notice could also change which file gets installed on shop hardware, and
+those are not the same weight of action.
+
 ## Open
 
 - **ETC 매출 분해** — originals are received (`etc_sale_log`) but not
   decomposed; the document defers the detail table shape (§3.3).
-- **§3.5's remaining pieces**: System Date 동기화, 프로그램 배포, 공지 및
-  긴급 메시지. The heartbeat already carries program and DB version,
-  which is what a deployment target list would be built from.
-- **BO has no screen for any of this yet.** 개점 현황, Live Check and
-  마스터 배포 현황 are three obvious ones, and the endpoints are shaped for
-  them (`/pos/business`, `/pos/live`, `/pos/masters/pending`).
+- **Quartz still schedules in memory.** Decomposition and any future POS
+  batch stop while the container is down. Unprocessed originals survive, so
+  nothing is lost — but nothing moves either.
+- **No thresholds anywhere.** Live Check, the retry lists and the forced-
+  pickup count are all screens someone has to open. None of them tells you.
 - **BO `devices` still keys on `device_id` alone**, although a terminal is
   identified by (매장, 번호, 종류) — the same shape this ADR just used for
   master dispatch. Fixing it (surrogate id + UNIQUE) is a prerequisite for

@@ -107,7 +107,9 @@ Docker approach ever needs to be un-done.
 - [`docs/adr/0013`](docs/adr/0013-pos-server-becomes-a-system-of-record.md)
   — POS-Server starts holding facts: 매출 원본과 분해, 단말 단위 개점·마감
   (재개점은 서버가 판단하고 지나간 전문은 상태를 못 바꾼다), Live Check 5종,
-  마스터 배포(적용 버전은 장비가 말해야 올라간다).
+  마스터 배포(적용 버전은 장비가 말해야 올라간다). 추가분(09-18): §3.5 의 나머지
+  — 시계는 서버가 재고, 프로그램 버전은 이름이라 되돌리기가 그냥 새 배포이며,
+  긴급 메시지는 먼저 적고 그다음에 민다. 그리고 그것을 볼 BO 화면 넷.
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a

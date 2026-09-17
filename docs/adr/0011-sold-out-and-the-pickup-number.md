@@ -158,9 +158,95 @@ unavailable costs more than a missing estimate.
   `SCREEN_ACTIONS` to express that 결품 has no 저장 — you hang it or you
   release it, which is CREATE and DELETE.
 
+## Addendum, 2026-09-18: the number gets a marked way around it
+
+Sun&Moon, from the shop floor: **"수령하기 부분은 강제 진행이라는 버튼이
+필요할것같아요. 매장 입장에서 필수 입력이 많으면 불만이 가득해요."**
+
+That is correct, and the reason is worth writing down rather than just the
+change. Customers who cannot produce the number are a real population, not
+an edge case — the phone screen went to sleep, a friend came to collect, the
+slip went in the bin. A counter that physically cannot hand the food over in
+those cases stops with a queue in front of it.
+
+### What we did not do: make the check optional
+
+The obvious fix — drop the PIN field, or accept a blank one — is worse than
+no check at all, and this is the load-bearing judgement of the addendum.
+
+A required field that gets in the way does not stay required; it stays
+*recorded*. Staff find the way around it, and the ways are always the same:
+a fixed number everyone on the shift knows, or reading the number off the
+screen in front of them without asking the customer. The system then holds a
+log saying "번호 확인함" for handovers where nobody checked anything. That is
+not a weaker guarantee than having no check — it is a **false record**, and a
+false record is worse than an absent one, because the next person reads it
+and believes it.
+
+### What we did: leave the door, and mark it
+
+- The default path is unchanged: type the number, and a wrong one is still
+  403.
+- 강제 진행 is a second button, on its own row, in its own colour — amber,
+  not the green of 내주기 and not the red of danger. It is not an accident
+  and the shop should not feel guilty pressing it; it is simply the lesser
+  path. It is **deliberately not adjacent** to 내주기: side by side, the
+  nearer button wins during a rush, and within a day the number is
+  decoration.
+- Orders carry `pickup_override`, and BO's 매출 조회 shows a "번호 확인 없음"
+  badge on exactly those rows. **Recording it with nowhere to look is the
+  same as not recording it.** Normal handovers stay quiet — a green badge on
+  every row would bury the amber one.
+
+That count is now a signal with two readings, and both are things we want to
+know: customers genuinely cannot produce the number (fix how it is shown), or
+the shop has stopped asking (the number is already decoration).
+
+### And a gap it exposed
+
+`handedOver(deviceId)` took a device id **and threw it away**. Nothing
+recorded who handed an order over, or when. A dispute about a collected order
+had nothing to go back to. `pickup_by` / `pickup_at` land in the same change,
+which is how the override could be recorded at all.
+
+## Addendum, 2026-09-18: DID flows, and KDS can call again
+
+Second correction from the same conversation: **"DID는 흐르는 것으로 해주시는
+것이 더 좋아보여요. 대신 KDS에서 재 호출 기능만 있었으면해요."**
+
+The board had briefly been changed to hold a number until it was collected —
+reasonable, since 수령 확인 now moves PRODUCED → COMPLETED and the number
+does eventually leave. But a board that holds everything becomes a *list*,
+and in a list the number that just came out is buried among the ones nobody
+picked up. A display customers glance at from across a room has to flow.
+
+So `called_at`: set when cooking finishes, and pushed forward by 재호출. The
+DID draws what was called in the last ~90 seconds and lets the rest slide off.
+
+Three things fell out of that shape:
+
+- **Calling is not a state.** An order called five times is still PRODUCED.
+  Modelling it as a status would have put a self-transition in the state
+  machine, which is not a transition.
+- **The screen does not remember.** The earlier implementation kept a
+  `shownOrders` set in `sessionStorage`, which meant a reloaded board
+  replayed the day and two boards side by side disagreed. Asking the server
+  *when it was last called* removes both problems and the storage with them.
+- **The button is on the KDS, not the DID.** Whether a customer has turned
+  up is known in the kitchen, not by the screen. The display never decides
+  to re-call on its own.
+
+The countdown bar came back for a reason that is not decoration: a number
+that vanishes with no warning reads as *gone* and sends the customer to the
+counter. One that visibly drains reads as *passed*, and the ask becomes "다시
+불러 주세요".
+
 ## Open
 
 - 수령번호 as a scannable QR (the owner's "QR을 찍으면 고객에게 상품이
   나오도록") — the number proves it today; automation reads it later.
 - 결품 by quantity rather than a flag ("남은 3개") — the flag is what was
   asked for, and quantity needs stock it does not have yet.
+- **강제 진행 건수에 임계가 없습니다.** BO shows them per order; nobody is
+  told when the rate climbs. That is the alarm this record was written to
+  make possible, and it is not built yet.
