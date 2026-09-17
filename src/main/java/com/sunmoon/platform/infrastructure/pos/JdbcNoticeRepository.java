@@ -158,6 +158,34 @@ public final class JdbcNoticeRepository implements NoticeRepository {
         }
     }
 
+    @Override
+    public java.util.Set<Long> acknowledgedBy(String storeId, String deviceType, String deviceNo) {
+        if (storeId == null || deviceType == null || deviceNo == null) {
+            // 장비를 모르면 "아무것도 확인 안 했다"입니다. 전부 확인한
+            // 것으로 치면 새 단말이 긴급 메시지를 영영 못 봅니다.
+            return java.util.Set.of();
+        }
+        String sql = """
+                SELECT notice_id FROM pos_notice_receipt
+                 WHERE store_id = ? AND device_type = ? AND device_no = ?
+                """;
+        try (Connection c = dataSource.getConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, storeId);
+            ps.setString(2, deviceType);
+            ps.setString(3, deviceNo);
+            try (ResultSet rs = ps.executeQuery()) {
+                java.util.Set<Long> ids = new java.util.LinkedHashSet<>();
+                while (rs.next()) {
+                    ids.add(rs.getLong(1));
+                }
+                return ids;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("공지 확인 기록을 읽지 못했습니다", e);
+        }
+    }
+
     private static final String SELECT = """
             SELECT id, store_id, device_type, title, body, urgent,
                    starts_at, ends_at, created_by, created_at

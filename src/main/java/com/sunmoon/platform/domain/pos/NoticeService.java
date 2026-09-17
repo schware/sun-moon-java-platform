@@ -78,6 +78,11 @@ public final class NoticeService {
         return repository.activeFor(storeId, deviceType, clock.instant());
     }
 
+    /** 그 장비가 이미 확인한 공지 번호들 — 화면이 다시 가로막지 않게. */
+    public java.util.Set<Long> acknowledgedBy(String storeId, String deviceType, String deviceNo) {
+        return repository.acknowledgedBy(storeId, deviceType, deviceNo);
+    }
+
     public List<Notice> all(String storeId, int limit) {
         return repository.all(storeId, limit);
     }

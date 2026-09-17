@@ -192,7 +192,18 @@ public final class PosSystemEndpoints {
 
     // ---- 공지·긴급 메시지 ---------------------------------------------
 
-    /** {@code GET /pos/notices?storeId=&deviceType=} — 지금 그 장비에 걸린 것. */
+    /**
+     * {@code GET /pos/notices?storeId=&deviceType=&deviceNo=} — 지금 그 장비에 걸린 것.
+     *
+     * <p>{@code deviceNo} 를 주면 <b>그 장비가 이미 확인했는지</b>를 줄마다
+     * 표시합니다. 이게 없던 동안 화면은 확인을 눌러도 다음 조회에 같은
+     * 긴급 메시지를 또 받았습니다 — 서버는 확인 기록을 갖고 있었는데
+     * 조회에 장비 번호가 아예 없었습니다.
+     *
+     * <p>확인한 것을 <b>목록에서 빼지는 않습니다</b>. 한 번 읽고 사라지는
+     * 글이면 내용을 되짚을 수가 없습니다. 화면을 가로막는 것은 안 본
+     * 것만이고, 목록에는 본 것도 남습니다.
+     */
     public RestEndpoint activeNotices() {
         return request -> {
             String storeId = param(request, "storeId");
@@ -200,9 +211,14 @@ public final class PosSystemEndpoints {
                 return badRequest("storeId is required");
             }
             String deviceType = param(request, "deviceType");
+            String deviceNo = param(request, "deviceNo");
+            java.util.Set<Long> seen = notices.acknowledgedBy(storeId, deviceType, deviceNo);
+
             List<Map<String, Object>> rows = new ArrayList<>();
             for (Notice notice : notices.activeFor(storeId, deviceType)) {
-                rows.add(view(notice));
+                Map<String, Object> row = view(notice);
+                row.put("acknowledged", seen.contains(notice.id()));
+                rows.add(row);
             }
             return JsonResponses.of(HttpResponseStatus.OK, Map.of(
                     "storeId", storeId, "notices", rows));
