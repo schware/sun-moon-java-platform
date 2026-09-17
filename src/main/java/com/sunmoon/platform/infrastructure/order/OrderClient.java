@@ -80,6 +80,20 @@ public final class OrderClient {
         return value == null ? "null" : "\"" + value.replace("\"", "") + "\"";
     }
 
+    /**
+     * {@code POST /orders/{id}/received} — POS가 받아서 저장했다는 사실.
+     *
+     * <p><b>상태를 바꾸는 호출이 아닙니다.</b> 주문은 여전히 매장의
+     * 답을 기다립니다. 이 기록이 있어야 "POS가 아예 못 받았다"와
+     * "받고도 매장이 답을 안 했다"가 갈립니다 (업무 정의서 §5.3, §9.2).
+     */
+    public HttpResponse<String> markReceived(long orderId, String deviceId) throws Exception {
+        String encoded = URLEncoder.encode(deviceId, StandardCharsets.UTF_8);
+        return send(HttpRequest.newBuilder(
+                URI.create(baseUrl + "/orders/" + orderId + "/received?deviceId=" + encoded))
+                .POST(HttpRequest.BodyPublishers.noBody()));
+    }
+
     /** {@code GET /business-days/{storeId}} — whether that store has 개점'd, and whether it needs 마감. */
     public HttpResponse<String> businessDayStatus(String storeId) throws Exception {
         String encoded = URLEncoder.encode(storeId, StandardCharsets.UTF_8);

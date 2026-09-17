@@ -169,10 +169,15 @@ public final class OrderEventSubscriber {
      * ACCEPTED goes to KDS because that is the kitchen's cue. PRODUCED
      * goes to DID, the store-facing display. The delivery states are
      * shown on POS, which is where a store watches an order leave.
+     *
+     * <p>COOKING goes to <b>POS</b>, not KDS. 주방이 집었다는 것은
+     * 주방에게는 이미 아는 사실이고(자기가 누른 것입니다), 모르는 쪽은
+     * 카운터입니다 — 손님이 "언제 나오나요"라고 물었을 때 "아직 안
+     * 들어갔습니다"와 "만들고 있습니다"를 가르는 값이라서요.
      */
     private static TerminalType audienceFor(String status) {
         return switch (status) {
-            case "PLACED", "REJECTED", "DELIVERING", "COMPLETED" -> TerminalType.POS;
+            case "PLACED", "REJECTED", "COOKING", "DELIVERING", "COMPLETED" -> TerminalType.POS;
             case "ACCEPTED" -> TerminalType.KDS;
             case "PRODUCED" -> TerminalType.DID;
             default -> null;

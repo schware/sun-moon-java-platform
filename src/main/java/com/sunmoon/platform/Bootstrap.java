@@ -176,6 +176,9 @@ public final class Bootstrap {
                 // 전이와 따로인 이유는 번호 검사가 붙어 있기 때문입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/pickup"), orderEndpoints.handOver()),
 
+                // POS 수신 완료 — 상태 전이가 아니라 전달 사실입니다.
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/received"), orderEndpoints.markReceived()),
+
                 // The terminal's local master: what this store sells today
                 // and what it has run out of. Read from APP-SERVER, which
                 // reads BO — the terminal knows neither.

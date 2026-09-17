@@ -122,6 +122,35 @@ public final class OrderProxyEndpoints {
         };
     }
 
+    /**
+     * {@code POST /orders/received?id=1&deviceId=pos-01}
+     *
+     * <p>POS가 주문을 받아 저장했다고 알리는 자리. 상태 전이가 아니라
+     * 전달 사실이라 {@code /orders/status} 와 따로 있습니다 — 한 곳에
+     * 섞으면 "상태를 바꾸지 않는 상태 변경"이 됩니다.
+     */
+    public RestEndpoint markReceived() {
+        return request -> {
+            String rawId = param(request.uri(), "id");
+            String deviceId = param(request.uri(), "deviceId");
+            if (rawId == null || deviceId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "id and deviceId are required"));
+            }
+            long orderId;
+            try {
+                orderId = Long.parseLong(rawId);
+            } catch (NumberFormatException notANumber) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
+            }
+            try {
+                return passThrough(orders.markReceived(orderId, deviceId));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
     /** {@code GET /business-days/status?storeId=store-01} — whether that store has 개점'd. */
     public RestEndpoint businessDayStatus() {
         return request -> {
