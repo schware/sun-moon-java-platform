@@ -177,7 +177,7 @@ public final class OrderEventSubscriber {
      */
     private static TerminalType audienceFor(String status) {
         return switch (status) {
-            case "PLACED", "REJECTED", "COOKING", "DELIVERING", "COMPLETED" -> TerminalType.POS;
+            case "PLACED", "REJECTED", "CANCELLED", "COOKING", "DELIVERING", "COMPLETED" -> TerminalType.POS;
             case "ACCEPTED" -> TerminalType.KDS;
             case "PRODUCED" -> TerminalType.DID;
             default -> null;
