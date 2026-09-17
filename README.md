@@ -104,6 +104,10 @@ Docker approach ever needs to be un-done.
   — APP-SERVER keeps its own order ledger because "what the customer asked
   for" and "what the store was given to make" are different records; the
   screen mints the idempotency key, and 거절 is not 못 닿음.
+- [`docs/adr/0013`](docs/adr/0013-pos-server-becomes-a-system-of-record.md)
+  — POS-Server starts holding facts: 매출 원본과 분해, 단말 단위 개점·마감
+  (재개점은 서버가 판단하고 지나간 전문은 상태를 못 바꾼다), Live Check 5종,
+  마스터 배포(적용 버전은 장비가 말해야 올라간다).
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a

@@ -143,10 +143,34 @@ have to be torn open when one arrives.
 - The customer-visible response keeps `menuName`/`amount` alongside the
   new shape, so the screen did not have to change in the same deploy.
 
+## Addendum, 2026-09-17: 조회·취소 and the channel filter shipped
+
+Both open items above are done, and one of them turned into a decision
+worth recording.
+
+**Tracking shows two axes side by side.** `GET /orders/{id}` answers with
+the ledger's own status *and* OMS's, because they answer different
+questions and are routinely different: `ledger=SENT, omsStatus=PLACED`
+means we handed it over and the store has not accepted yet. Collapsing
+them into one word would have to pick which of the two to lie about.
+
+**Cancellation is OMS's decision, not APP-SERVER's.** The obvious
+shortcut — refuse locally when the ledger says the order is past a
+certain point — is wrong, because acceptance and cancellation overlap in
+time. In that window APP-SERVER's guess is a guess, and if it is wrong
+the two systems believe different things about a real order in a real
+kitchen. So APP-SERVER asks, and follows the answer: 수락된 주문 comes back
+409 `CANCEL_REFUSED` with OMS's own sentence. The one case it decides
+alone is an order that never reached OMS — there is no work in the store
+to cancel, so it closes the ledger row locally.
+
+**BO's APP 매출 조회 now filters on the recorded channel**, not on a guess.
+It previously inferred QR from the presence of a table number, which is a
+destination, not an origin. Live check afterwards: QR 2 / APP 0, and
+rejected and send-failed orders became visible for the first time — they
+had never appeared in a 매출 view at all.
+
 ## Open
 
-- 주문 상태 조회·취소 (§4.5) — the ledger can hold them; no endpoint yet.
 - 외부 채널 주문번호 (`EXTERNAL_ORDER_NO`) — the map table gains a column
   when a channel exists.
-- BO's APP 매출 조회 should filter on `order_channel` once it reads the
-  APP ledger rather than OMS.
