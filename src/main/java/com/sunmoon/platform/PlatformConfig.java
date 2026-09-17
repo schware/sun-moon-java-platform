@@ -19,10 +19,11 @@ public final class PlatformConfig {
     private final String appServerUrl;
     private final String redisUrl;
     private final Duration terminalGrace;
+    private final Duration heartbeatGrace;
 
     private PlatformConfig(int apiPort, int socketPort, int workerThreads,
                            String orderServiceUrl, String appServerUrl, String redisUrl,
-                           Duration terminalGrace) {
+                           Duration terminalGrace, Duration heartbeatGrace) {
         this.apiPort = apiPort;
         this.socketPort = socketPort;
         this.workerThreads = workerThreads;
@@ -30,6 +31,7 @@ public final class PlatformConfig {
         this.appServerUrl = appServerUrl;
         this.redisUrl = redisUrl;
         this.terminalGrace = terminalGrace;
+        this.heartbeatGrace = heartbeatGrace;
     }
 
     public static PlatformConfig fromEnv() {
@@ -42,7 +44,8 @@ public final class PlatformConfig {
                 env.getOrDefault("ORDER_SERVICE_URL", "http://localhost:8083/order"),
                 env.getOrDefault("APP_SERVER_URL", "http://localhost:8086/app-server"),
                 env.get("REDIS_URL"),
-                Duration.parse(env.getOrDefault("TERMINAL_GRACE", "PT3M")));
+                Duration.parse(env.getOrDefault("TERMINAL_GRACE", "PT3M")),
+                Duration.parse(env.getOrDefault("POS_HEARTBEAT_GRACE", "PT2M")));
     }
 
     public int apiPort() {
@@ -98,5 +101,21 @@ public final class PlatformConfig {
      */
     public Duration terminalGrace() {
         return terminalGrace;
+    }
+
+    /**
+     * Heartbeat 가 이보다 오래되면 그 POS의 보고를 <b>모른다</b>로
+     * 칩니다 (§3.5).
+     *
+     * <p>{@link #terminalGrace()} 와 따로인 이유: 저쪽은 "소켓이 잠깐
+     * 끊겼어도 사람은 매장에 있다"는 판단이고, 이쪽은 "마지막으로
+     * 정상이라고 말한 뒤에 죽었을 수 있다"는 판단입니다. 하나로 묶으면
+     * 둘 중 하나는 반드시 틀린 값으로 돕니다.
+     *
+     * <p>POS의 보고 주기보다 넉넉해야 합니다 — 주기와 같으면 한 번만
+     * 늦어도 멀쩡한 단말이 UNKNOWN 이 됩니다.
+     */
+    public Duration heartbeatGrace() {
+        return heartbeatGrace;
     }
 }

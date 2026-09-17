@@ -2,6 +2,8 @@ package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.CreateOrderEndpoint;
 import com.sunmoon.platform.api.MenuProxyEndpoints;
+import com.sunmoon.platform.api.MasterEndpoints;
+import com.sunmoon.platform.api.PosOperationEndpoints;
 import com.sunmoon.platform.api.SaleEndpoints;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
@@ -20,6 +22,12 @@ import com.sunmoon.platform.domain.order.OrderRepository;
 import com.sunmoon.platform.domain.sale.JsonSaleDecomposer;
 import com.sunmoon.platform.domain.sale.SaleDecomposeJob;
 import com.sunmoon.platform.domain.sale.SaleRepository;
+import com.sunmoon.platform.domain.pos.MasterDispatchService;
+import com.sunmoon.platform.domain.pos.PosBusinessService;
+import com.sunmoon.platform.domain.pos.PosLiveService;
+import com.sunmoon.platform.infrastructure.pos.JdbcMasterRepository;
+import com.sunmoon.platform.infrastructure.pos.JdbcPosBusinessRepository;
+import com.sunmoon.platform.infrastructure.pos.JdbcPosLiveRepository;
 import com.sunmoon.platform.infrastructure.sale.JdbcSaleRepository;
 import com.sunmoon.platform.infrastructure.messaging.EventPublisher;
 import com.sunmoon.platform.infrastructure.messaging.InMemoryEventPublisher;
@@ -91,13 +99,29 @@ public final class Bootstrap {
         DeviceDirectory directory = new AcceptKnownFormatDirectory();
         registerTerminalGauges(terminals);
 
+        // POS 운영 (§3.4~3.6). 매출과 같은 데이터베이스, 같은 조건 —
+        // POSTGRES_JDBC_URL 이 없으면 셋 다 없고, 해당 주소는 503 입니다.
+        PosBusinessService posBusiness = salesDataSource == null ? null
+                : new PosBusinessService(new JdbcPosBusinessRepository(salesDataSource));
+        PosLiveService posLive = salesDataSource == null ? null : new PosLiveService(
+                terminals,
+                new JdbcPosLiveRepository(salesDataSource),
+                new JdbcPosBusinessRepository(salesDataSource),
+                // 서버가 본 것: 그 매장 그 날 분해에 실패한 매출 건수.
+                // POS는 자기가 보낸 매출이 서버에서 깨졌는지 모릅니다.
+                (storeId, businessDate) -> sales.totals(storeId, businessDate).failed(),
+                config.heartbeatGrace(), java.time.Clock.systemUTC());
+        MasterDispatchService posMasters = salesDataSource == null ? null
+                : new MasterDispatchService(new JdbcMasterRepository(salesDataSource));
+
         OrderClient orderClient = new OrderClient(config.orderServiceUrl());
         AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
         subscribeToEvents(config, terminals, orderClient);
 
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
-                        apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales),
+                        apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales,
+                                posBusiness, posLive, posMasters),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -175,12 +199,16 @@ public final class Bootstrap {
      */
     private static Map<RouteKey, RestEndpoint> apiRoutes(
             EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient,
-            AppServerClient appServerClient, SaleRepository sales) {
+            AppServerClient appServerClient, SaleRepository sales,
+            PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
         MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
         SaleEndpoints saleEndpoints = sales == null ? null : new SaleEndpoints(sales);
+        PosOperationEndpoints posEndpoints = posBusiness == null ? null
+                : new PosOperationEndpoints(posBusiness, posLive);
+        MasterEndpoints masterEndpoints = posMasters == null ? null : new MasterEndpoints(posMasters);
 
         return Map.ofEntries(
                 Map.entry(new RouteKey(HttpMethod.GET, "/health"), new HealthCheckEndpoint()),
@@ -208,6 +236,34 @@ public final class Bootstrap {
                         saleEndpoints == null ? noSaleStore() : saleEndpoints.receive()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/sales/totals"),
                         saleEndpoints == null ? noSaleStore() : saleEndpoints.totals()),
+
+                // POS 개점·마감 (§3.4). Order 쪽 /business-days 와 다릅니다 —
+                // 저쪽은 매장이 주문을 받는가이고, 이쪽은 그 단말이 매출을
+                // 올릴 수 있는가입니다. POS 셋 중 하나만 마감한 매장은
+                // 여전히 영업 중입니다.
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/business"),
+                        posEndpoints == null ? noPosStore() : posEndpoints.receiveBusinessIrt()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/business"),
+                        posEndpoints == null ? noPosStore() : posEndpoints.businessStates()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/business/history"),
+                        posEndpoints == null ? noPosStore() : posEndpoints.businessHistory()),
+
+                // Live Check 5종 (§3.5). 연결 하나로 정상 여부를 판단하지
+                // 않기 위해 축을 갈라서 답합니다.
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/heartbeat"),
+                        posEndpoints == null ? noPosStore() : posEndpoints.heartbeat()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/live"),
+                        posEndpoints == null ? noPosStore() : posEndpoints.liveCheck()),
+
+                // 마스터 IRT 배포 (§3.6). 내용이 아니라 버전과 적용 결과.
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/masters"),
+                        masterEndpoints == null ? noPosStore() : masterEndpoints.plan()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/masters/ack"),
+                        masterEndpoints == null ? noPosStore() : masterEndpoints.ack()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/masters/version"),
+                        masterEndpoints == null ? noPosStore() : masterEndpoints.bumpVersion()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/masters/pending"),
+                        masterEndpoints == null ? noPosStore() : masterEndpoints.pending()),
 
                 // The terminal's local master: what this store sells today
                 // and what it has run out of. Read from APP-SERVER, which
@@ -264,6 +320,13 @@ public final class Bootstrap {
      * 할 수 없는</b> 상태입니다. 404를 내면 POS가 주소를 잘못 쓴 줄
      * 알고, 조용히 영원히 재시도하거나 사람이 엉뚱한 곳을 고칩니다.
      */
+    /** 같은 이유로 503 입니다 — 주소는 맞고 저장소가 없습니다. */
+    private static RestEndpoint noPosStore() {
+        return request -> com.sunmoon.platform.transport.http.JsonResponses.of(
+                io.netty.handler.codec.http.HttpResponseStatus.SERVICE_UNAVAILABLE,
+                Map.of("error", "POS 운영 저장소가 설정되지 않았습니다 (POSTGRES_JDBC_URL)"));
+    }
+
     private static RestEndpoint noSaleStore() {
         return request -> com.sunmoon.platform.transport.http.JsonResponses.of(
                 io.netty.handler.codec.http.HttpResponseStatus.SERVICE_UNAVAILABLE,
