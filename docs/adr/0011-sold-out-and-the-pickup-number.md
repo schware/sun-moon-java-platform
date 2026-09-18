@@ -241,6 +241,85 @@ that vanishes with no warning reads as *gone* and sends the customer to the
 counter. One that visibly drains reads as *passed*, and the ask becomes "다시
 불러 주세요".
 
+## Addendum, 2026-09-18: KDS는 하나가 아니다 — 생산과 메인
+
+매장에서 온 보고: **"kds01, kds02가 분리 되었지만 첫번째 메뉴가 kds02이면
+전부 kds02로 가네요."**
+
+주방이 **주문**에 하나 붙어 있었고(`orders.kdsDeviceId`), 그 값은 첫 줄의
+것이었습니다. 짜장면(kds-01)과 초밥(kds-02)을 함께 시키면 짜장면까지
+kds-02 로 갔고, kds-01 은 자기 것을 못 봤습니다.
+
+### 주문을 쪼개지 않았다
+
+The obvious fix is splitting one customer order into one per kitchen. That
+breaks the rule this ADR already established: **손님 한 명에 수령번호
+하나**. Two orders means two numbers and the customer is called twice for
+one meal.
+
+So the order stays one and the **kitchen moves onto the line**
+(`order_line.kds_device_id`).
+
+### 그러자 따라온 것: 먼저 끝낸 주방이 번호를 부른다
+
+With lines split across kitchens, whoever presses 조리완료 first would move
+the whole order to PRODUCED — the DID calls the number and the customer
+comes for a half-made meal.
+
+So completion is per line too: `producedBy(deviceId)` marks **only that
+kitchen's lines**, and the order moves to PRODUCED — and is called for the
+first time — **only when every line is done**. If lines remain, no event is
+published either: there is no reason to wake the DID for an order that is
+still waiting on the other kitchen.
+
+### 그리고 남은 질문: 누가 손님에게 내주는가
+
+Making one order span two kitchens exposed a hole I had not thought about.
+Sun&Moon named it:
+
+> **"KDS가 분리 되어야 하네요. 1. 메뉴를 생산하는 KDS 2. 그 KDS를 관리하는
+> KDS MAIN... 지금의 방향성에서 KDS-MAIN만 추가 하면 해결될것 같아요"**
+
+That is right, and it is the smallest thing that closes the hole:
+
+| | 생산 주방 (kds-01, kds-02) | 메인 |
+| --- | --- | --- |
+| 보는 것 | **자기 줄만** | 전체, 줄마다 주방과 완료 표시 |
+| 조리완료 | 자기 줄만 | 전부 |
+| 수령 확인 | **없음** | 있음 |
+
+**수령이 메인의 일인 이유**: 생산 주방은 자기 것밖에 모릅니다. 짜장면을
+만든 주방이 초밥이 나왔는지 모르는 채로 내주면 손님은 반만 받아 갑니다.
+Handover needs someone who can see the whole order, and that is exactly
+what MAIN is for.
+
+생산 주방의 티켓에 남의 주방 줄을 안 그리는 것도 같은 이유의 반대편
+입니다 — 섞이면 무엇을 만들어야 하는지가 흐려지고, 다 된 줄 알고 넘깁니다.
+
+내 줄은 끝났는데 주문이 아직 COOKING 이면 조리완료 버튼을 **치웁니다**.
+눌러도 아무 일이 안 일어나는 버튼을 두면 주방은 고장인 줄 알고 계속
+누릅니다. 대신 무엇을 기다리는지 적습니다.
+
+역할은 서버가 모릅니다 — 단말 등록에서 고르고 창마다 기억합니다. Push는
+이미 매장의 모든 KDS로 가므로 서버 쪽에 바꿀 것이 없었습니다.
+
+## Addendum, 2026-09-18: 확인한 긴급이 다시 뜨던 것
+
+매장 보고: 긴급 메시지가 **"지속적으로 반복적으로"** 나왔습니다.
+
+`pos_notice_receipt` 에는 기록이 있었습니다. 조회가 **안 읽었을 뿐**
+입니다 — `GET /pos/notices` 에 장비 번호가 아예 없었고, 화면이 브라우저
+메모리로 기억하다 새로고침하면 잊었습니다.
+
+이제 조회가 `deviceNo` 를 받고 줄마다 `acknowledged` 를 답합니다.
+**목록에서 빼지 않고 표시만** 합니다: 한 번 읽고 사라지는 글이면 내용을
+되짚을 수가 없습니다.
+
+Sun&Moon 이 함께 말한 *"POS 역시 DB가 있어야 할 것 같아요"* 는 이 건과는
+별개로 여전히 맞습니다(ADR-0010). 다만 이 버그에 한해서는 **서버가 이미
+사실을 갖고 있었고**, 단말에 DB를 두었다면 같은 사실이 두 곳에 생겼을
+것입니다.
+
 ## Open
 
 - 수령번호 as a scannable QR (the owner's "QR을 찍으면 고객에게 상품이
