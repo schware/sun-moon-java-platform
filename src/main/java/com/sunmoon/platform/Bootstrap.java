@@ -107,7 +107,26 @@ public final class Bootstrap {
         // The Device Server's two halves: terminals hold WebSockets here,
         // and everything about them is answered over REST on the same port.
         TerminalRegistry terminals = new TerminalRegistry();
-        DeviceDirectory directory = new AcceptKnownFormatDirectory();
+        /*
+         * 단말이 BO에 등록된 장비인지 확인할 것인가 (2026-09-24).
+         *
+         * **기본값은 확인하지 않는 것입니다.** 확인하려면 이 데이터베이스에
+         * v_bo_devices 뷰가 걸려 있어야 하는데, 그건 superuser 가
+         * postgres_fdw 를 잡아야 만들어집니다(docs/adr/0008). 켜는 것을
+         * 기본으로 두면, 뷰가 아직 없는 서버에 이 버전을 올리는 순간
+         * 전 매장 단말이 조용히 못 붙습니다.
+         *
+         * 그래서 순서가 이렇습니다: 배포 → SQL 실행 → DEVICE_DIRECTORY=bo
+         * 로 다시 띄우기. 배포와 권한 작업이 갈라져 있는 것은 이 서버에서
+         * sudo 가 사람 손을 타기 때문이기도 합니다.
+         */
+        DeviceDirectory formatOnly = new AcceptKnownFormatDirectory();
+        DeviceDirectory directory = "bo".equalsIgnoreCase(System.getenv("DEVICE_DIRECTORY"))
+                && salesDataSource != null
+                ? new com.sunmoon.platform.infrastructure.terminal.BoDeviceDirectory(
+                        salesDataSource, formatOnly)
+                : formatOnly;
+        log.info("단말 확인 방식: {}", directory.getClass().getSimpleName());
         registerTerminalGauges(terminals);
 
         // POS 운영 (§3.4~3.6). 매출과 같은 데이터베이스, 같은 조건 —

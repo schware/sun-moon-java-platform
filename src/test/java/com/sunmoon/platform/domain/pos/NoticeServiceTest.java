@@ -181,9 +181,30 @@ class NoticeServiceTest {
             return stored.stream().filter(n -> n.id() == id).findFirst();
         }
 
+        /** 확인 기록. 실제 표처럼 <b>같은 장비가 두 번 확인해도 한 줄</b>입니다. */
+        private final java.util.Map<Long, java.util.Set<String>> seen = new java.util.HashMap<>();
+
         @Override
         public void acknowledge(long noticeId, String storeId, String deviceType, String deviceNo) {
-            receipts.add(new Receipt(storeId, deviceType, deviceNo, Instant.now()));
+            boolean isNew = seen.computeIfAbsent(noticeId, k -> new java.util.LinkedHashSet<>())
+                    .add(storeId + "|" + deviceType + "|" + deviceNo);
+            if (isNew) {
+                receipts.add(new Receipt(storeId, deviceType, deviceNo, Instant.now()));
+            }
+        }
+
+        @Override
+        public java.util.Set<Long> acknowledgedBy(String storeId, String deviceType, String deviceNo) {
+            if (storeId == null || deviceType == null || deviceNo == null) {
+                // 장비를 모르면 "아무것도 확인 안 했다"입니다. 전부 확인한
+                // 것으로 치면 새 단말이 긴급 메시지를 영영 못 봅니다.
+                return java.util.Set.of();
+            }
+            String who = storeId + "|" + deviceType + "|" + deviceNo;
+            return seen.entrySet().stream()
+                    .filter(e -> e.getValue().contains(who))
+                    .map(java.util.Map.Entry::getKey)
+                    .collect(java.util.stream.Collectors.toSet());
         }
 
         @Override

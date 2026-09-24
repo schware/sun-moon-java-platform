@@ -76,7 +76,7 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
         String storeId = first(query, "storeId");
         String rawType = first(query, "type");
 
-        if (!directory.isRegistered(deviceId)) {
+        if (deviceId == null || deviceId.isBlank()) {
             reject(ctx, request, "deviceId is missing or not a valid device id");
             return;
         }
@@ -94,6 +94,18 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
         List<String> storeIds = splitStoreIds(storeId);
         if (storeIds.isEmpty()) {
             reject(ctx, request, "storeId is required");
+            return;
+        }
+
+        // 등록 확인은 **매장과 종류를 안 뒤에** 합니다 (2026-09-24).
+        // 단말의 신원은 (매장, 번호, 종류)이고, 번호만으로 물으면
+        // 어느 매장의 어느 종류인지 모른 채 답하게 됩니다.
+        //
+        // DID는 여러 매장을 볼 수 있어서 첫 매장으로 묻습니다 — 장비는
+        // 한 대이고 어딘가에 등록돼 있으면 되는데, 그 "어딘가"를
+        // 대표하는 값이 필요합니다.
+        if (!directory.isRegistered(storeIds.get(0), deviceId, type.name())) {
+            reject(ctx, request, "deviceId is missing or not a valid device id");
             return;
         }
         if (type != TerminalType.DID && storeIds.size() > 1) {

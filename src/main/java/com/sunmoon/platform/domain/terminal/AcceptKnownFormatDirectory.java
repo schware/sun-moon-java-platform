@@ -19,8 +19,14 @@ public final class AcceptKnownFormatDirectory implements DeviceDirectory {
 
     private static final Pattern DEVICE_ID = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9_-]{1,63}");
 
+    /**
+     * 매장과 종류는 <b>보지 않습니다</b>. 볼 것이 없어서입니다 — 이
+     * 구현이 아는 것은 모양뿐이고, 모양은 매장마다 다르지 않습니다.
+     * 파라미터를 받아 두는 것은 여기서 쓰라는 뜻이 아니라, BO를 보는
+     * 구현이 그것들을 필요로 하기 때문입니다.
+     */
     @Override
-    public boolean isRegistered(String deviceId) {
+    public boolean isRegistered(String storeId, String deviceId, String type) {
         return deviceId != null && DEVICE_ID.matcher(deviceId).matches();
     }
 }
