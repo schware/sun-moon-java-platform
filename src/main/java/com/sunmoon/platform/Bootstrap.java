@@ -1,5 +1,7 @@
 package com.sunmoon.platform;
 
+import com.sunmoon.platform.api.auth.ApiGuard;
+import com.sunmoon.platform.api.auth.TerminalTokens;
 import com.sunmoon.platform.api.CreateOrderEndpoint;
 import com.sunmoon.platform.api.MenuProxyEndpoints;
 import com.sunmoon.platform.api.MasterEndpoints;
@@ -180,11 +182,15 @@ public final class Bootstrap {
         AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
         subscribeToEvents(config, terminals, orderClient);
 
+        // HTTP 주소마다 누가 불러도 되는지 (store-app.md §2.2). 기본 warn — 막지 않고 적습니다.
+        ApiGuard apiGuard = new ApiGuard(ApiGuard.modeFrom(System.getenv("API_AUTH")),
+                System.getenv("ADMIN_TOKEN"), TerminalTokens.NONE);
+
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
-                        apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales,
-                                etcLogs, posBusiness, posLive, posMasters, posPrograms, posNotices,
-                                reprocess),
+                        apiGuard.protect(apiRoutes(eventPublisher, terminals, orderClient,
+                                appServerClient, sales, etcLogs, posBusiness, posLive, posMasters,
+                                posPrograms, posNotices, reprocess)),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
