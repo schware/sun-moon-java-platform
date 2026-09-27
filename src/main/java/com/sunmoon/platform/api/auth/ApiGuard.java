@@ -1,5 +1,7 @@
 package com.sunmoon.platform.api.auth;
 
+import com.sunmoon.platform.domain.pairing.DeviceIdentity;
+import com.sunmoon.platform.domain.pairing.TerminalTokens;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -75,6 +77,8 @@ public final class ApiGuard {
         // 관리로 두면 긁기가 막힙니다. 지표는 기계의 사실이라 공개로 둡니다 —
         // store-app.md §2.2 와 다른 점으로 적어 둡니다.
         put(HttpMethod.GET, "/metrics", Audience.PUBLIC);
+        // 페어링은 코드 자체가 증명입니다 (§3.4). 무차별 대입은 PairingService 가 막습니다.
+        put(HttpMethod.POST, "/pos/pair", Audience.PUBLIC);
 
         for (String path : new String[] {
                 "/orders/status", "/orders/pickup", "/orders/recall", "/orders/received",
@@ -90,6 +94,32 @@ public final class ApiGuard {
         // 장비가 가져가고 BO 도 들여다봅니다.
         put(HttpMethod.GET, "/pos/masters", Audience.TERMINAL_OR_ADMIN);
         put(HttpMethod.GET, "/pos/programs", Audience.TERMINAL_OR_ADMIN);
+
+        // 관리 — 표에 없어도 관리지만, 적어 두면 "잊은 것" 과 "정한 것" 이 구분됩니다.
+        for (String path : new String[] {
+                "/terminals", "/sales/totals", "/etc-sales/totals", "/pos/business",
+                "/pos/business/history", "/pos/live", "/pos/masters/pending", "/reprocess",
+                "/pos/programs/status", "/pos/notices/all", "/pos/devices"}) {
+            put(HttpMethod.GET, path, Audience.ADMIN);
+        }
+        for (String path : new String[] {
+                "/terminals/push", "/terminals/broadcast", "/pos/masters/version",
+                "/reprocess/one", "/reprocess/all", "/pos/programs/release", "/pos/notices",
+                "/orders/legacy", "/pos/pairing-codes", "/pos/devices/revoke"}) {
+            put(HttpMethod.POST, path, Audience.ADMIN);
+        }
+    }
+
+    /**
+     * 지금 처리 중인 요청을 보낸 기기. 단말 토큰이 확인된 요청에서만 있습니다.
+     *
+     * <p>엔드포인트는 요청만 받으므로 신원을 여기로 넘깁니다. 엔드포인트 호출은
+     * 동기(응답을 돌려줌)라 같은 스레드에서 끝나고, 끝나면 지웁니다.
+     */
+    private static final ThreadLocal<DeviceIdentity> CURRENT = new ThreadLocal<>();
+
+    public static Optional<DeviceIdentity> currentDevice() {
+        return Optional.ofNullable(CURRENT.get());
     }
 
     private static void put(HttpMethod method, String path, Audience audience) {
@@ -120,6 +150,14 @@ public final class ApiGuard {
         log.info("API 인증: {} (관리 토큰 {})", mode, this.adminToken == null ? "없음" : "있음");
     }
 
+    public Mode mode() {
+        return mode;
+    }
+
+    public TerminalTokens terminals() {
+        return terminals;
+    }
+
     public static Mode modeFrom(String raw) {
         if (raw == null || raw.isBlank()) {
             return Mode.WARN;
@@ -139,7 +177,7 @@ public final class ApiGuard {
         for (Map.Entry<RouteKey, RestEndpoint> route : routes.entrySet()) {
             Audience audience = audienceOf(route.getKey());
             if (!AUDIENCE.containsKey(route.getKey())) {
-                log.info("분류 안 된 주소 — 관리로 봅니다: {} {}",
+                log.warn("분류 안 된 주소 — 관리로 봅니다: {} {}",
                         route.getKey().method(), route.getKey().path());
             }
             guarded.put(route.getKey(), wrap(route.getKey(), audience, route.getValue()));
@@ -154,7 +192,7 @@ public final class ApiGuard {
         return request -> {
             Verdict verdict = check(audience, request);
             if (verdict.ok()) {
-                return endpoint.handle(request);
+                return handleAs(verdict.identity().orElse(null), endpoint, request);
             }
             report(key, verdict.reason());
             if (mode == Mode.WARN) {
@@ -163,6 +201,19 @@ public final class ApiGuard {
             return JsonResponses.of(HttpResponseStatus.UNAUTHORIZED,
                     Map.of("error", "인증이 필요합니다", "reason", verdict.reason()));
         };
+    }
+
+    private static io.netty.handler.codec.http.FullHttpResponse handleAs(
+            DeviceIdentity device, RestEndpoint endpoint, FullHttpRequest request) {
+        if (device == null) {
+            return endpoint.handle(request);
+        }
+        CURRENT.set(device);
+        try {
+            return endpoint.handle(request);
+        } finally {
+            CURRENT.remove();
+        }
     }
 
     record Verdict(boolean ok, String reason, Optional<DeviceIdentity> identity) {

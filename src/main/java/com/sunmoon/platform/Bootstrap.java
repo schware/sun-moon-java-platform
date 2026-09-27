@@ -1,7 +1,8 @@
 package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.auth.ApiGuard;
-import com.sunmoon.platform.api.auth.TerminalTokens;
+import com.sunmoon.platform.api.PairingEndpoints;
+import com.sunmoon.platform.domain.pairing.PairingService;
 import com.sunmoon.platform.api.CreateOrderEndpoint;
 import com.sunmoon.platform.api.MenuProxyEndpoints;
 import com.sunmoon.platform.api.MasterEndpoints;
@@ -183,15 +184,20 @@ public final class Bootstrap {
         subscribeToEvents(config, terminals, orderClient);
 
         // HTTP 주소마다 누가 불러도 되는지 (store-app.md §2.2). 기본 warn — 막지 않고 적습니다.
+        // 기기 토큰은 페어링이 발급합니다 (§3). 데이터베이스가 없으면 기억만 — 재기동하면 다시 페어링.
+        PairingService pairing = new PairingService(salesDataSource == null
+                ? new com.sunmoon.platform.infrastructure.pairing.InMemoryPairingStore()
+                : new com.sunmoon.platform.infrastructure.pairing.JdbcPairingStore(salesDataSource),
+                java.time.Clock.systemUTC());
         ApiGuard apiGuard = new ApiGuard(ApiGuard.modeFrom(System.getenv("API_AUTH")),
-                System.getenv("ADMIN_TOKEN"), TerminalTokens.NONE);
+                System.getenv("ADMIN_TOKEN"), pairing);
 
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiGuard.protect(apiRoutes(eventPublisher, terminals, orderClient,
                                 appServerClient, sales, etcLogs, posBusiness, posLive, posMasters,
-                                posPrograms, posNotices, reprocess)),
-                        blockingWorkExecutor, directory, terminals)),
+                                posPrograms, posNotices, reprocess, new PairingEndpoints(pairing))),
+                        blockingWorkExecutor, directory, terminals, apiGuard)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(orders);
@@ -272,7 +278,7 @@ public final class Bootstrap {
             com.sunmoon.platform.domain.intake.RawLogStore etcLogs,
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
             ProgramDeployService posPrograms, NoticeService posNotices,
-            ReprocessService reprocess) {
+            ReprocessService reprocess, PairingEndpoints pairing) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
@@ -364,6 +370,12 @@ public final class Bootstrap {
 
                 // System Date 동기화 (§3.5). 갓 켜진 POS는 보고할 상태가
                 // 없는데 시각은 그때 제일 필요합니다.
+                // 기기 페어링 (store-app.md §3.4). 청중은 ApiGuard 표에.
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/pairing-codes"), pairing.issueCode()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/pair"), pairing.pair()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/devices/revoke"), pairing.revoke()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/devices"), pairing.list()),
+
                 Map.entry(new RouteKey(HttpMethod.GET, "/pos/time"),
                         posEndpoints == null ? noPosStore() : posEndpoints.serverTime()),
 

@@ -2,6 +2,8 @@ package com.sunmoon.platform.api.auth;
 
 import com.sunmoon.platform.api.auth.ApiGuard.Audience;
 import com.sunmoon.platform.api.auth.ApiGuard.Mode;
+import com.sunmoon.platform.domain.pairing.DeviceIdentity;
+import com.sunmoon.platform.domain.pairing.TerminalTokens;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -35,7 +37,7 @@ class ApiGuardTest {
     private static final RouteKey HEALTH = new RouteKey(HttpMethod.GET, "/health");
 
     private static final TerminalTokens ONE_DEVICE = token -> "good-device".equals(token)
-            ? Optional.of(new DeviceIdentity("S001", "POS-01", "POS")) : Optional.empty();
+            ? Optional.of(new DeviceIdentity("S001", "POS-01", "POS", null)) : Optional.empty();
 
     private final AtomicInteger calls = new AtomicInteger();
     private final RestEndpoint ok = request -> {
@@ -86,6 +88,22 @@ class ApiGuardTest {
         FullHttpRequest device = request(ORDERS);
         device.headers().set("Authorization", "Device good-device");
         assertEquals(200, status(guard, ORDERS, device));
+    }
+
+    @Test
+    void the_endpoint_sees_which_device_called_and_it_is_gone_afterwards() {
+        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", ONE_DEVICE);
+        java.util.concurrent.atomic.AtomicReference<Optional<DeviceIdentity>> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        RestEndpoint probe = request -> {
+            seen.set(ApiGuard.currentDevice());
+            return JsonResponses.of(HttpResponseStatus.OK, Map.of());
+        };
+        FullHttpRequest device = request(ORDERS);
+        device.headers().set("Authorization", "Device good-device");
+        guard.protect(Map.of(ORDERS, probe)).get(ORDERS).handle(device);
+
+        assertEquals("POS-01", seen.get().orElseThrow().deviceId());
+        assertTrue(ApiGuard.currentDevice().isEmpty());
     }
 
     @Test
