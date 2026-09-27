@@ -112,9 +112,13 @@ public final class JdbcRawLogStore implements RawLogStore {
     @Override
     public List<RawLog> failed(String storeId) {
         boolean everyStore = storeId == null || storeId.isBlank();
+        // LIMIT 200 은 TR 이 원래 쓰던 값입니다. 공통으로 옮기면서 빠뜨릴
+        // 뻔했습니다 — 대량 실패가 난 날 이 목록이 수만 줄이 되면 재처리
+        // 화면이 열리지도 않습니다. 200 건이 넘게 실패했다면 한 건씩 볼
+        // 일이 아니라 규칙을 고치고 "전부 다시" 를 누를 일입니다.
         String sql = select() + " WHERE status = 'FAILED'"
                 + (everyStore ? "" : " AND store_id = ?")
-                + " ORDER BY received_at";
+                + " ORDER BY received_at LIMIT 200";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql)) {
             if (!everyStore) {

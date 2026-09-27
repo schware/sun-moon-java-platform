@@ -2,7 +2,9 @@ package com.sunmoon.platform.infrastructure.sale;
 
 import com.sunmoon.platform.domain.sale.DecomposedSale;
 import com.sunmoon.platform.domain.sale.SaleLog;
+import com.sunmoon.platform.domain.intake.RawLog;
 import com.sunmoon.platform.domain.sale.SaleRepository;
+import com.sunmoon.platform.infrastructure.intake.JdbcRawLogStore;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -29,8 +31,30 @@ public final class JdbcSaleRepository implements SaleRepository {
 
     private final DataSource dataSource;
 
+    /**
+     * 원본의 <b>수명주기</b>(받기·대기·실패·되돌리기)는 공통 저장소에
+     * 맡깁니다 (2026-09-27). ETC 매출이 같은 모양이라, 그 SQL 을 두 벌
+     * 두지 않으려고 뺐습니다.
+     *
+     * <p><b>동작은 바뀌지 않았습니다.</b> 옮기기 전에 SQL 을 글자 단위로
+     * 대조했고, 한 군데 달랐던 것(실패 목록의 {@code LIMIT 200})은
+     * 공통 쪽을 여기에 맞췄습니다. 이 클래스에 남은 것은 TR 만의 일 —
+     * 분해 결과를 표 넷에 넣는 {@link #store} 와 {@link #totals} — 입니다.
+     */
+    private final JdbcRawLogStore logs;
+
     public JdbcSaleRepository(DataSource dataSource) {
+        this(dataSource, new JdbcRawLogStore(dataSource, "tr_sale_log", "tran_no", "매출"));
+    }
+
+    public JdbcSaleRepository(DataSource dataSource, JdbcRawLogStore logs) {
         this.dataSource = dataSource;
+        this.logs = logs;
+    }
+
+    /** 공통 배치와 재처리가 같은 저장소를 보게 — Bootstrap 이 넘겨줍니다. */
+    public JdbcRawLogStore rawLogs() {
+        return logs;
     }
 
     /**
@@ -41,59 +65,12 @@ public final class JdbcSaleRepository implements SaleRepository {
      */
     @Override
     public Optional<Long> receive(SaleLog log) {
-        String sql = """
-                INSERT INTO tr_sale_log
-                  (store_id, pos_no, business_date, tran_no, content_type, payload)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (business_date, store_id, pos_no, tran_no) DO NOTHING
-                RETURNING id
-                """;
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, log.storeId());
-            ps.setString(2, log.posNo());
-            ps.setDate(3, Date.valueOf(log.businessDate()));
-            ps.setString(4, log.tranNo());
-            ps.setString(5, log.contentType());
-            ps.setBytes(6, log.payload());
-            try (ResultSet rs = ps.executeQuery()) {
-                return rs.next() ? Optional.of(rs.getLong(1)) : Optional.empty();
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("매출 원본을 저장하지 못했습니다", e);
-        }
+        return logs.receive(toRaw(log));
     }
 
     @Override
     public List<SaleLog> pending(int limit) {
-        String sql = """
-                SELECT id, store_id, pos_no, business_date, tran_no, content_type, payload,
-                       status, error, attempts, received_at, decomposed_at
-                  FROM tr_sale_log
-                 WHERE status = 'RECEIVED'
-                 ORDER BY received_at
-                 LIMIT ?
-                """;
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setInt(1, limit);
-            try (ResultSet rs = ps.executeQuery()) {
-                List<SaleLog> logs = new ArrayList<>();
-                while (rs.next()) {
-                    logs.add(new SaleLog(
-                            rs.getLong("id"), rs.getString("store_id"), rs.getString("pos_no"),
-                            rs.getObject("business_date", LocalDate.class), rs.getString("tran_no"),
-                            rs.getString("content_type"), rs.getBytes("payload"),
-                            SaleLog.Status.valueOf(rs.getString("status")), rs.getString("error"),
-                            rs.getInt("attempts"),
-                            instant(rs.getTimestamp("received_at")),
-                            instant(rs.getTimestamp("decomposed_at"))));
-                }
-                return logs;
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("분해 대기 목록을 읽지 못했습니다", e);
-        }
+        return logs.pending(limit).stream().map(JdbcSaleRepository::toSale).toList();
     }
 
     @Override
@@ -114,15 +91,8 @@ public final class JdbcSaleRepository implements SaleRepository {
                 insertPayments(c, logId, headerId, sale.payments());
                 insertEtc(c, logId, headerId, sale.etc());
 
-                try (PreparedStatement ps = c.prepareStatement("""
-                        UPDATE tr_sale_log
-                           SET status = 'DECOMPOSED', error = NULL,
-                               attempts = attempts + 1, decomposed_at = now()
-                         WHERE id = ?
-                        """)) {
-                    ps.setLong(1, logId);
-                    ps.executeUpdate();
-                }
+                // 끝났다는 표시도 같은 트랜잭션 — SQL 은 공통 쪽에 있습니다.
+                logs.markDecomposed(c, logId);
                 c.commit();
             } catch (SQLException | RuntimeException e) {
                 c.rollback();
@@ -236,73 +206,47 @@ public final class JdbcSaleRepository implements SaleRepository {
 
     @Override
     public List<SaleLog> failed(String storeId) {
-        String sql = """
-                SELECT id, store_id, pos_no, business_date, tran_no, content_type, payload,
-                       status, error, attempts, received_at, decomposed_at
-                  FROM tr_sale_log
-                 WHERE status = 'FAILED' AND (? IS NULL OR store_id = ?)
-                 ORDER BY received_at
-                 LIMIT 200
-                """;
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql)) {
-            ps.setString(1, storeId);
-            ps.setString(2, storeId);
-            try (ResultSet rs = ps.executeQuery()) {
-                List<SaleLog> logs = new ArrayList<>();
-                while (rs.next()) {
-                    logs.add(new SaleLog(
-                            rs.getLong("id"), rs.getString("store_id"), rs.getString("pos_no"),
-                            rs.getObject("business_date", LocalDate.class), rs.getString("tran_no"),
-                            rs.getString("content_type"), rs.getBytes("payload"),
-                            SaleLog.Status.valueOf(rs.getString("status")), rs.getString("error"),
-                            rs.getInt("attempts"),
-                            instant(rs.getTimestamp("received_at")),
-                            instant(rs.getTimestamp("decomposed_at"))));
-                }
-                return logs;
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("실패한 매출 목록을 읽지 못했습니다", e);
-        }
+        return logs.failed(storeId).stream().map(JdbcSaleRepository::toSale).toList();
     }
 
     /**
      * FAILED 를 RECEIVED 로 되돌립니다 — 배치가 다음 회차에 집어 갑니다.
      *
-     * <p>{@code status = 'FAILED'} 조건이 붙어 있는 것이 중요합니다.
-     * 이미 분해된 건을 되돌리면 멀쩡한 매출이 다시 풀리고, 그 사이에
-     * 조회하면 없는 것처럼 보입니다.
+     * <p>{@code status = 'FAILED'} 조건이 붙어 있는 것이 중요합니다 (공통
+     * 쪽 SQL 에 그대로 있습니다). 이미 분해된 건을 되돌리면 멀쩡한 매출이
+     * 다시 풀리고, 그 사이에 조회하면 없는 것처럼 보입니다.
      */
     @Override
     public boolean markForRetry(long logId) {
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(
-                     "UPDATE tr_sale_log SET status = 'RECEIVED' WHERE id = ? AND status = 'FAILED'")) {
-            ps.setLong(1, logId);
-            return ps.executeUpdate() > 0;
-        } catch (SQLException e) {
-            throw new IllegalStateException("매출 재처리를 걸지 못했습니다", e);
-        }
+        return logs.markForRetry(logId);
     }
 
+    /** 사유를 그대로 남깁니다. 운영자가 무엇이 빠졌는지 보고 재처리할 수 있어야 합니다 (§3.2). */
     @Override
     public void markFailed(long logId, String error) {
-        String sql = """
-                UPDATE tr_sale_log
-                   SET status = 'FAILED', error = ?, attempts = attempts + 1
-                 WHERE id = ?
-                """;
-        try (Connection c = dataSource.getConnection();
-             PreparedStatement ps = c.prepareStatement(sql)) {
-            // 사유를 그대로 남깁니다. 운영자가 무엇이 빠졌는지 보고
-            // 재처리할 수 있어야 합니다 (§3.2).
-            ps.setString(1, error);
-            ps.setLong(2, logId);
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            throw new IllegalStateException("분해 실패를 기록하지 못했습니다: log " + logId, e);
-        }
+        logs.markFailed(logId, error);
+    }
+
+    // ---- SaleLog ↔ RawLog --------------------------------------------
+    //
+    // SaleLog 를 없애지 않은 이유: SaleEndpoints 와 POS Live Check 가
+    // SaleRepository 를 통해 쓰고 있고, 이 변경은 **동작을 안 바꾸는 것**이
+    // 목표입니다. 이름이 tranNo 냐 refNo 냐의 차이뿐이라 옮기는 데 잃는
+    // 것이 없습니다. (SaleDecomposeJob 과 SaleReprocessor 는 공통 쪽
+    // IntakeJob · RawLogReprocessor 로 대체되어 지웠습니다.)
+
+    private static RawLog toRaw(SaleLog log) {
+        return new RawLog(log.id(), log.storeId(), log.posNo(), log.businessDate(), log.tranNo(),
+                log.contentType(), log.payload(),
+                log.status() == null ? null : RawLog.Status.valueOf(log.status().name()),
+                log.error(), log.attempts(), log.receivedAt(), log.decomposedAt());
+    }
+
+    private static SaleLog toSale(RawLog raw) {
+        return new SaleLog(raw.id(), raw.storeId(), raw.posNo(), raw.businessDate(), raw.refNo(),
+                raw.contentType(), raw.payload(),
+                raw.status() == null ? null : SaleLog.Status.valueOf(raw.status().name()),
+                raw.error(), raw.attempts(), raw.receivedAt(), raw.decomposedAt());
     }
 
     /**

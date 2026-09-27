@@ -22,11 +22,11 @@ import com.sunmoon.platform.core.CoreRuntime;
 import com.sunmoon.platform.core.ListenerSpec;
 import com.sunmoon.platform.domain.order.OrderRepository;
 import com.sunmoon.platform.domain.sale.JsonSaleDecomposer;
-import com.sunmoon.platform.domain.sale.SaleDecomposeJob;
+import com.sunmoon.platform.domain.sale.DecomposedSale;
+import com.sunmoon.platform.domain.sale.SaleDecomposeException;
 import com.sunmoon.platform.domain.reprocess.MasterReprocessor;
 import com.sunmoon.platform.domain.reprocess.ProgramReprocessor;
 import com.sunmoon.platform.domain.reprocess.ReprocessService;
-import com.sunmoon.platform.domain.reprocess.SaleReprocessor;
 import com.sunmoon.platform.domain.sale.SaleRepository;
 import com.sunmoon.platform.domain.pos.MasterDispatchService;
 import com.sunmoon.platform.domain.pos.NoticeService;
@@ -93,7 +93,18 @@ public final class Bootstrap {
         // /sales 는 503으로 그 사실을 말합니다 — 조용히 404를 내면
         // POS가 주소를 잘못 쓴 줄 알고 영원히 재시도합니다.
         DataSource salesDataSource = buildDataSource();
-        SaleRepository sales = salesDataSource == null ? null : new JdbcSaleRepository(salesDataSource);
+        JdbcSaleRepository salesJdbc = salesDataSource == null ? null : new JdbcSaleRepository(salesDataSource);
+        SaleRepository sales = salesJdbc;
+        // 원본 수명주기 — TR 과 ETC 가 같은 구현을 표 이름만 바꿔 씁니다
+        // (§3.2, §3.3). TR 의 것은 매출 저장소가 이미 들고 있어서 그걸
+        // 그대로 씁니다 — 두 벌을 만들면 배치와 재처리가 서로 다른
+        // 객체를 보게 됩니다(상태는 없어서 틀리지는 않지만, 읽는 사람이
+        // "왜 둘이지" 를 넘겨야 합니다).
+        com.sunmoon.platform.infrastructure.intake.JdbcRawLogStore trLogs =
+                salesJdbc == null ? null : salesJdbc.rawLogs();
+        com.sunmoon.platform.infrastructure.intake.JdbcRawLogStore etcLogs = salesDataSource == null ? null
+                : new com.sunmoon.platform.infrastructure.intake.JdbcRawLogStore(
+                        salesDataSource, "etc_sale_log", "etc_no", "ETC 매출");
 
         OrderRepository orders = buildOrderRepository(salesDataSource);
         EventPublisher eventPublisher = new InMemoryEventPublisher();
@@ -152,10 +163,16 @@ public final class Bootstrap {
                 new JdbcNoticeRepository(salesDataSource),
                 new TerminalNoticeBroadcaster(terminals), java.time.Clock.systemUTC());
 
-        // 실패를 되돌리는 자리 (§5.8). 세 종류가 저장소는 다르지만
+        // 실패를 되돌리는 자리 (§5.8). 네 종류가 저장소는 다르지만
         // 운영자가 묻는 것은 하나라, 한 곳을 지나갑니다.
+        //
+        // TR 과 ETC 는 같은 클래스입니다(2026-09-27) — 둘 다 "원본이 있으니
+        // 상태만 되돌리면 배치가 다시 푼다" 이고, 글자 하나 빼고 같았습니다.
+        // 마스터·프로그램은 합치지 않았습니다: 저 둘은 장비가 가져가는
+        // 것이라 "다시 한다" 의 뜻이 다릅니다.
         ReprocessService reprocess = salesDataSource == null ? null : new ReprocessService(java.util.List.of(
-                new SaleReprocessor(sales),
+                new com.sunmoon.platform.domain.reprocess.RawLogReprocessor("SALE", "매출 분해", trLogs),
+                new com.sunmoon.platform.domain.reprocess.RawLogReprocessor("ETC", "ETC 매출 분해", etcLogs),
                 new MasterReprocessor(new JdbcMasterRepository(salesDataSource)),
                 new ProgramReprocessor(new JdbcProgramRepository(salesDataSource))));
 
@@ -166,13 +183,13 @@ public final class Bootstrap {
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiRoutes(eventPublisher, terminals, orderClient, appServerClient, sales,
-                                posBusiness, posLive, posMasters, posPrograms, posNotices,
+                                etcLogs, posBusiness, posLive, posMasters, posPrograms, posNotices,
                                 reprocess),
                         blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(orders);
-        scheduleSaleDecomposition(sales);
+        scheduleIntake(salesDataSource, sales, trLogs, etcLogs);
 
         new CoreRuntime(listeners).start();
     }
@@ -246,6 +263,7 @@ public final class Bootstrap {
     private static Map<RouteKey, RestEndpoint> apiRoutes(
             EventPublisher eventPublisher, TerminalRegistry terminals, OrderClient orderClient,
             AppServerClient appServerClient, SaleRepository sales,
+            com.sunmoon.platform.domain.intake.RawLogStore etcLogs,
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
             ProgramDeployService posPrograms, NoticeService posNotices,
             ReprocessService reprocess) {
@@ -254,6 +272,8 @@ public final class Bootstrap {
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
         MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
         SaleEndpoints saleEndpoints = sales == null ? null : new SaleEndpoints(sales);
+        com.sunmoon.platform.api.EtcSaleEndpoints etcEndpoints =
+                etcLogs == null ? null : new com.sunmoon.platform.api.EtcSaleEndpoints(etcLogs);
         PosOperationEndpoints posEndpoints = posBusiness == null ? null
                 : new PosOperationEndpoints(posBusiness, posLive);
         MasterEndpoints masterEndpoints = posMasters == null ? null : new MasterEndpoints(posMasters);
@@ -292,6 +312,11 @@ public final class Bootstrap {
                         saleEndpoints == null ? noSaleStore() : saleEndpoints.receive()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/sales/totals"),
                         saleEndpoints == null ? noSaleStore() : saleEndpoints.totals()),
+                // ETC 매출 (§3.3) — TR 과 같은 모양, 같은 조건(데이터베이스가 없으면 503).
+                Map.entry(new RouteKey(HttpMethod.POST, "/etc-sales"),
+                        etcEndpoints == null ? noSaleStore() : etcEndpoints.receive()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/etc-sales/totals"),
+                        etcEndpoints == null ? noSaleStore() : etcEndpoints.totals()),
 
                 // POS 개점·마감 (§3.4). Order 쪽 /business-days 와 다릅니다 —
                 // 저쪽은 매장이 주문을 받는가이고, 이쪽은 그 단말이 매출을
@@ -432,13 +457,44 @@ public final class Bootstrap {
      * <p>받는 것과 따로 도는 이유: POS는 매장에서 손님을 세워 두고
      * 기다립니다. 분해가 느리다고 수신이 느려지면 안 됩니다.
      */
-    private static void scheduleSaleDecomposition(SaleRepository sales) throws Exception {
+    private static void scheduleIntake(
+            javax.sql.DataSource salesDataSource, SaleRepository sales,
+            com.sunmoon.platform.infrastructure.intake.JdbcRawLogStore trLogs,
+            com.sunmoon.platform.infrastructure.intake.JdbcRawLogStore etcLogs) throws Exception {
         if (sales == null) {
             log.info("매출 저장소가 없어 분해 배치를 걸지 않습니다");
             return;
         }
-        SaleDecomposeJob job = new SaleDecomposeJob(sales, new JsonSaleDecomposer(), 200);
-        new BatchScheduler().scheduleEvery("tr-sale-decompose", 30, job::run);
+
+        // TR — 분해하고, 금액이 맞는지 보고, 표 넷에 넣습니다.
+        //
+        // 금액이 안 맞는 것을 SaleDecomposeException 으로 던지는 이유:
+        // 공통 배치가 그 예외만 보고 FAILED 로 낙인찍습니다. 다른 예외로
+        // 던지면 "저장 사고" 로 읽혀 30초마다 다시 풀립니다 — 2026-09-18의
+        // 388번 사고로 돌아갑니다.
+        JsonSaleDecomposer trDecomposer = new JsonSaleDecomposer();
+        com.sunmoon.platform.domain.intake.IntakeJob tr = new com.sunmoon.platform.domain.intake.IntakeJob(
+                "TR 매출", trLogs, raw -> {
+                    DecomposedSale sale = trDecomposer.decompose(raw.payload());
+                    if (!sale.balanced()) {
+                        throw new SaleDecomposeException("금액이 맞지 않습니다: " + sale.imbalance());
+                    }
+                    sales.store(raw.id(), sale);
+                }, 200);
+
+        // ETC — 이름·값으로 풀어 한 표에 넣습니다 (§3.3 은 구조를 미뤘습니다).
+        com.sunmoon.platform.domain.intake.IntakeJob etc = new com.sunmoon.platform.domain.intake.IntakeJob(
+                "ETC 매출", etcLogs,
+                new com.sunmoon.platform.infrastructure.etc.JdbcEtcSaleHandler(
+                        salesDataSource, etcLogs, new com.sunmoon.platform.domain.etc.JsonEtcDecomposer()),
+                200);
+
+        // 같은 Quartz 스케줄러에 이름만 다르게 겁니다. 30초는 TR 이 원래
+        // 쓰던 주기이고, POS 가 거래를 올리는 주기(30초)와 같아서 올린
+        // 것이 다음 분해에 곧바로 실립니다.
+        BatchScheduler scheduler = new BatchScheduler();
+        scheduler.scheduleEvery("tr-sale-decompose", 30, tr::run);
+        scheduler.scheduleEvery("etc-sale-decompose", 30, etc::run);
     }
 
     private static void runStartupBatchJob(OrderRepository orderRepository) throws Exception {
