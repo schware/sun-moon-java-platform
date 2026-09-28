@@ -85,11 +85,13 @@ public final class ApiGuard {
                 "/sales", "/etc-sales", "/pos/business", "/pos/heartbeat",
                 "/pos/masters/ack", "/pos/programs/ack", "/pos/notices/ack",
                 "/business-days/open", "/business-days/close",
-                "/orders/start", "/orders/force-produced"}) {
+                "/orders/start", "/orders/force-produced",
+                "/pos/print-jobs/ack", "/pos/print-jobs/reprint"}) {
             put(HttpMethod.POST, path, Audience.TERMINAL);
         }
         for (String path : new String[] {
-                "/orders", "/pos/notices", "/menus", "/business-days/status", "/kds/mode"}) {
+                "/orders", "/pos/notices", "/menus", "/business-days/status", "/kds/mode",
+                "/pos/printers", "/pos/print-jobs"}) {
             put(HttpMethod.GET, path, Audience.TERMINAL);
         }
         // 장비가 가져가고 BO 도 들여다봅니다.

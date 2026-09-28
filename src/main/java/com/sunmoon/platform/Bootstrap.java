@@ -174,15 +174,34 @@ public final class Bootstrap {
         // 상태만 되돌리면 배치가 다시 푼다" 이고, 글자 하나 빼고 같았습니다.
         // 마스터·프로그램은 합치지 않았습니다: 저 둘은 장비가 가져가는
         // 것이라 "다시 한다" 의 뜻이 다릅니다.
+        // 라벨 (store-app.md §7). 저장소가 있어야 합니다 — 없으면 프린터 주소는 503.
+        com.sunmoon.platform.infrastructure.print.JdbcPrintJobStore printJobs = salesDataSource == null ? null
+                : new com.sunmoon.platform.infrastructure.print.JdbcPrintJobStore(salesDataSource);
+        com.sunmoon.platform.infrastructure.print.BoPrinters boPrinters = salesDataSource == null ? null
+                : new com.sunmoon.platform.infrastructure.print.BoPrinters(salesDataSource);
+        com.sunmoon.platform.infrastructure.print.LabelPush labelPush =
+                new com.sunmoon.platform.infrastructure.print.LabelPush(terminals);
+
         ReprocessService reprocess = salesDataSource == null ? null : new ReprocessService(java.util.List.of(
                 new com.sunmoon.platform.domain.reprocess.RawLogReprocessor("SALE", "매출 분해", trLogs),
                 new com.sunmoon.platform.domain.reprocess.RawLogReprocessor("ETC", "ETC 매출 분해", etcLogs),
                 new MasterReprocessor(new JdbcMasterRepository(salesDataSource)),
-                new ProgramReprocessor(new JdbcProgramRepository(salesDataSource))));
+                new ProgramReprocessor(new JdbcProgramRepository(salesDataSource)),
+                new com.sunmoon.platform.domain.reprocess.PrintJobReprocessor(printJobs, printJobs::failed,
+                        (store, jobId) -> labelPush.push(store, java.util.List.of(jobId)))));
 
         OrderClient orderClient = new OrderClient(config.orderServiceUrl());
         AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
         subscribeToEvents(config, terminals, orderClient);
+        if (config.redisUrl() != null && printJobs != null) {
+            try {
+                new com.sunmoon.platform.infrastructure.print.LabelJobCreator(
+                        com.sunmoon.platform.infrastructure.cache.RedissonClientFactory.create(config.redisUrl()),
+                        orderClient, printJobs, boPrinters, labelPush).start();
+            } catch (RuntimeException e) {
+                log.error("라벨 작업을 만들 이벤트를 듣지 못합니다 — 라벨이 자동으로 안 나옵니다", e);
+            }
+        }
 
         // 주방의 명령은 KDS-MAIN 이 (§4.2). MAIN 이 언제까지 붙어 있었는지를 5초마다 적습니다.
         KdsAuthority kdsAuthority = new KdsAuthority(terminals, config.terminalGrace(), java.time.Clock.systemUTC());
@@ -210,7 +229,9 @@ public final class Bootstrap {
                         apiGuard.protect(apiRoutes(eventPublisher, terminals, orderClient,
                                 appServerClient, sales, etcLogs, posBusiness, posLive, posMasters,
                                 posPrograms, posNotices, reprocess, new PairingEndpoints(pairing),
-                                kdsAuthority)),
+                                kdsAuthority, printJobs == null ? null
+                                        : new com.sunmoon.platform.api.PrintEndpoints(
+                                                printJobs, boPrinters, labelPush, kdsAuthority))),
                         blockingWorkExecutor, directory, terminals, apiGuard)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -292,7 +313,8 @@ public final class Bootstrap {
             com.sunmoon.platform.domain.intake.RawLogStore etcLogs,
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
             ProgramDeployService posPrograms, NoticeService posNotices,
-            ReprocessService reprocess, PairingEndpoints pairing, KdsAuthority kdsAuthority) {
+            ReprocessService reprocess, PairingEndpoints pairing, KdsAuthority kdsAuthority,
+            com.sunmoon.platform.api.PrintEndpoints printing) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
         OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient, kdsAuthority);
@@ -388,6 +410,16 @@ public final class Bootstrap {
 
                 // System Date 동기화 (§3.5). 갓 켜진 POS는 보고할 상태가
                 // 없는데 시각은 그때 제일 필요합니다.
+                // 프린터와 라벨 (store-app.md §6.3, §7) — 페어링된 기기만.
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/printers"),
+                        printing == null ? noPosStore() : printing.printers()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/pos/print-jobs"),
+                        printing == null ? noPosStore() : printing.list()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/print-jobs/ack"),
+                        printing == null ? noPosStore() : printing.ack()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/print-jobs/reprint"),
+                        printing == null ? noPosStore() : printing.reprint()),
+
                 // 기기 페어링 (store-app.md §3.4). 청중은 ApiGuard 표에.
                 Map.entry(new RouteKey(HttpMethod.POST, "/pos/pairing-codes"), pairing.issueCode()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/pos/pair"), pairing.pair()),

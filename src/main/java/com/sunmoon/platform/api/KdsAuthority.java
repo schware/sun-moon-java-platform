@@ -45,7 +45,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class KdsAuthority {
 
-    public enum Action { PICKUP, RECALL, FORCE_PRODUCED }
+    /** REPRINT: 라벨 다시 찍기 (§7). 라벨 프린터가 KDS-MAIN 옆에 있어서 MAIN 의 일입니다. */
+    public enum Action { PICKUP, RECALL, FORCE_PRODUCED, REPRINT }
 
     public record Decision(boolean allowed, boolean emergency, String reason) {
         static Decision allow() {
