@@ -17,7 +17,7 @@
 | **4** 원장·결제 | ✅ §6.2 배포(Order V16, APP-SERVER, POS). §6.1 셸 SQLite 원장 구현 — 창 없는 점검으로 확인 | Order `7b23e38`, APP-SERVER `0d7dc2b`, POS `84e6c50` `cdef65b`, 셸 `73c96de` |
 | **5** 프린터·라벨 | ✅ 배포. 시험 매장으로 끝까지 확인(2026-09-28): 아메리카노 3 + 라떼 1 → 강제 완료 → 라벨 작업 4개 QUEUED → 셸(KDS-MAIN)이 가짜 프린터로 4장(CP949, "2 / 3") → PRINTED. 재출력은 MAIN 만(POS 403), content 복사 + copyNo 1, 2. 재처리에 PRINT. **실물 프린터는 아직** | Device Server `778f3cb` `0db98e6`, 셸 `43a1e46`, KDS `a6ae52d`, POS `dcd31ec`, Debian-Setting `6307583` |
 | **6** 화면 번들 업데이트 | ✅ 구현, **기본 꺼짐**(`SUNMOON_UI_UPDATES=on`) — §11 대로 enforce 뒤에 켬. 서명 키는 빌드 PC 에만(secrets.md H). 셸 자체 업데이트(§8.2)는 코드 서명 뒤 | 셸 `7edb66f`, Debian-Setting `5df0969` |
-| **7** KIOSK | 🔶 구현, 배포 중 | Order `21bef04`, Device Server `5b78385`, BO `1809e31`, channel-order `63dc40b`, 셸 `97b2b67` |
+| **7** KIOSK | ✅ 서버 배포, 끝까지 확인(2026-09-29): 셸(KIOSK) → 가상 결제 → 원장 채번 → `/orders/kiosk`(값은 메뉴판에서) → 주문 ACCEPTED(`tp-kiosk`/000001) → 매출 분해까지(`tr_sale_payment` 에 SUNMOON_PAY). POS 403, 1원 결제 409. BO·channel-order 는 다음 배포 때 | Order `21bef04`, Device Server `5b78385` `3dfcc78`, BO `1809e31`, channel-order `63dc40b`, 셸 `97b2b67` `2c4ea03` |
 | 8 | 아직 (선택) | — |
 
 **설계와 달라진 것 (구현하면서 정한 것):**
