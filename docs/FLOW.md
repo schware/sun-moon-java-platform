@@ -258,7 +258,7 @@ Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼�
 
 - **`API_AUTH=enforce`** — 매장 단말을 페어링으로 옮긴 뒤(Sun&Moon 결정)
 - **실물 프린터** 확인, 코드 서명 인증서(그 뒤 셸 자체 업데이트)
-- KIOSK 결제수단 사용 여부 확인, 진짜 VAN
+- 진짜 VAN (그때 KIOSK 는 결제수단 확인을 승인 **전**으로)
 - 손님 앱 A3(Android 껍데기 — Android SDK 필요) · A4(푸시 — Firebase 프로젝트 필요). 서버 쪽 준비
   (`/members/me/push-token`, `member_device.push_token`)는 되어 있습니다
 - 단말 코드 공통화(8단계, 선택) — 지금 `pairing.ts` 는 세 저장소에 같은 복사본
