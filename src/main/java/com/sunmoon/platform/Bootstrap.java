@@ -351,6 +351,8 @@ public final class Bootstrap {
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/recall"), orderEndpoints.recall()),
                 // KDS-MAIN 의 권한 (store-app.md §4). 역할 확인은 KdsAuthority.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/start"), orderEndpoints.start()),
+                // KIOSK — 캐셔 없는 POS (store-app.md §9).
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/kiosk"), orderEndpoints.kiosk()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/force-produced"), orderEndpoints.forceProduced()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/kds/mode"), orderEndpoints.kdsMode()),
 

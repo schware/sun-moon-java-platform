@@ -11,7 +11,8 @@ import java.util.Set;
  */
 public record DeviceIdentity(String storeId, String deviceId, String type, String kdsRole) {
 
-    public static final Set<String> TYPES = Set.of("POS", "KDS", "DID");
+    /** KIOSK 는 캐셔 없는 POS (store-app.md §9) — WebSocket 을 쓰지 않아 TerminalType 에는 없습니다. */
+    public static final Set<String> TYPES = Set.of("POS", "KDS", "DID", "KIOSK");
 
     public DeviceIdentity {
         type = type == null ? null : type.trim().toUpperCase(Locale.ROOT);

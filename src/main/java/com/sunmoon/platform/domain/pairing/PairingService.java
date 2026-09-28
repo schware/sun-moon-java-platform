@@ -158,7 +158,7 @@ public final class PairingService implements TerminalTokens {
             throw new IllegalArgumentException("storeId 와 deviceId 가 필요합니다");
         }
         if (!DeviceIdentity.TYPES.contains(device.type())) {
-            throw new IllegalArgumentException("deviceType 은 POS, KDS, DID 중 하나입니다");
+            throw new IllegalArgumentException("deviceType 은 POS, KDS, DID, KIOSK 중 하나입니다");
         }
     }
 

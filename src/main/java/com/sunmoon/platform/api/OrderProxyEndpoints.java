@@ -347,6 +347,55 @@ public final class OrderProxyEndpoints {
         };
     }
 
+    /**
+     * {@code POST /orders/kiosk} — 캐셔 없는 POS 의 주문 (store-app.md §9).
+     *
+     * <p>본문: {@code {lines:[{menuCode, menuName, quantity, unitPrice, kdsDeviceId}], tranNo,
+     * payment:{method, approvalNo, amount}, memberNo}}. <b>매장·단말은 본문이 아니라 토큰의
+     * 신원</b>에서 씁니다 — KIOSK 로 페어링된 기기만 부를 수 있습니다(모드와 상관없이).
+     * Order 에는 수락된 채로 생깁니다({@code POST /orders/accepted}).
+     */
+    public RestEndpoint kiosk() {
+        return request -> {
+            java.util.Optional<DeviceIdentity> device = ApiGuard.currentDevice();
+            if (device.isEmpty()) {
+                return JsonResponses.of(HttpResponseStatus.UNAUTHORIZED,
+                        Map.of("error", "페어링된 KIOSK 만 주문을 넣습니다"));
+            }
+            if (!"KIOSK".equals(device.get().type())) {
+                return forbidden(device.get().type() + " 에서는 KIOSK 주문을 넣을 수 없습니다");
+            }
+            com.fasterxml.jackson.databind.JsonNode body;
+            try {
+                body = JSON.readTree(request.content().toString(StandardCharsets.UTF_8));
+            } catch (Exception e) {
+                body = null;
+            }
+            if (body == null || !body.path("lines").isArray() || body.path("lines").isEmpty()
+                    || body.path("tranNo").asText("").isBlank()) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "lines 와 tranNo 가 필요합니다"));
+            }
+            com.fasterxml.jackson.databind.node.ObjectNode order = JSON.createObjectNode();
+            order.put("storeId", device.get().storeId());
+            String member = body.path("memberNo").asText("");
+            order.put("customerId", member.isBlank() ? "kiosk" : member);
+            order.set("lines", body.get("lines"));
+            if (body.hasNonNull("payment")) {
+                order.set("payment", body.get("payment"));
+            }
+            com.fasterxml.jackson.databind.node.ObjectNode wrapper = JSON.createObjectNode();
+            wrapper.set("order", order);
+            wrapper.put("deviceId", device.get().deviceId());
+            wrapper.put("tranNo", body.path("tranNo").asText());
+            try {
+                return passThrough(orders.createAccepted(JSON.writeValueAsString(wrapper)));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
     private static Long orderId(String uri) {
         String raw = param(uri, "id");
         if (raw == null) {

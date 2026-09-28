@@ -88,6 +88,13 @@ public final class OrderClient {
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId)).GET());
     }
 
+    /** {@code POST /orders/accepted} — KIOSK 주문: 생성과 수락을 한 번에 (store-app.md §9). */
+    public HttpResponse<String> createAccepted(String json) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/accepted"))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json)));
+    }
+
     /** {@code POST /orders/{id}/start} — 그 주방의 줄만 조리 시작 (store-app.md §4.1). */
     public HttpResponse<String> start(long orderId, String deviceId) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/start?deviceId="
