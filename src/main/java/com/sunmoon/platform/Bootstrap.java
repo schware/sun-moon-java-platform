@@ -235,7 +235,8 @@ public final class Bootstrap {
                                                 java.time.Clock.systemUTC())),
                                 kdsAuthority, printJobs == null ? null
                                         : new com.sunmoon.platform.api.PrintEndpoints(
-                                                printJobs, boPrinters, labelPush, kdsAuthority))),
+                                                printJobs, boPrinters, labelPush, kdsAuthority),
+                                salesDataSource)),
                         blockingWorkExecutor, directory, terminals, apiGuard)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -318,10 +319,11 @@ public final class Bootstrap {
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
             ProgramDeployService posPrograms, NoticeService posNotices,
             ReprocessService reprocess, PairingEndpoints pairing, KdsAuthority kdsAuthority,
-            com.sunmoon.platform.api.PrintEndpoints printing) {
+            com.sunmoon.platform.api.PrintEndpoints printing, javax.sql.DataSource paymentDataSource) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
-        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient, kdsAuthority, appServerClient);
+        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient, kdsAuthority, appServerClient)
+                .withPaymentMethods(new com.sunmoon.platform.infrastructure.payment.BoPaymentMethods(paymentDataSource));
         MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
         SaleEndpoints saleEndpoints = sales == null ? null : new SaleEndpoints(sales);
         com.sunmoon.platform.api.EtcSaleEndpoints etcEndpoints =

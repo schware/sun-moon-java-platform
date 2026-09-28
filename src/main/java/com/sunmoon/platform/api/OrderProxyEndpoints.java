@@ -51,11 +51,19 @@ public final class OrderProxyEndpoints {
         this(orders, kds, null);
     }
 
+    /** KIOSK 결제수단이 BO 에서 켜져 있나 (§9). 없으면 확인하지 않음. */
+    private com.sunmoon.platform.infrastructure.payment.BoPaymentMethods paymentMethods;
+
     public OrderProxyEndpoints(OrderClient orders, KdsAuthority kds,
                                com.sunmoon.platform.infrastructure.appserver.AppServerClient menuBoard) {
         this.orders = orders;
         this.kds = kds;
         this.menuBoard = menuBoard;
+    }
+
+    public OrderProxyEndpoints withPaymentMethods(com.sunmoon.platform.infrastructure.payment.BoPaymentMethods methods) {
+        this.paymentMethods = methods;
+        return this;
     }
 
     /**
@@ -402,6 +410,15 @@ public final class OrderProxyEndpoints {
             }
             if (priced.refusal() != null) {
                 return JsonResponses.of(HttpResponseStatus.CONFLICT, Map.of("error", priced.refusal()));
+            }
+            // 결제수단이 BO 에서 꺼져 있으면 받지 않습니다 — 앱 주문과 같은 규칙(못 읽으면 막지 않음).
+            if (paymentMethods != null && body.hasNonNull("payment")) {
+                String method = body.path("payment").path("method").asText("");
+                if (paymentMethods.of(method)
+                        == com.sunmoon.platform.infrastructure.payment.BoPaymentMethods.Acceptance.DISABLED) {
+                    return JsonResponses.of(HttpResponseStatus.CONFLICT,
+                            Map.of("error", "지금 받지 않는 결제수단입니다: " + method, "reason", "PAYMENT_METHOD_DISABLED"));
+                }
             }
             long total = KioskPricing.total(priced.lines());
             if (body.hasNonNull("payment")
