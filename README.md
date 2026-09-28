@@ -115,10 +115,17 @@ Docker approach ever needs to be un-done.
   — 시계는 서버가 재고, 프로그램 버전은 이름이라 되돌리기가 그냥 새 배포이며,
   긴급 메시지는 먼저 적고 그다음에 민다. 그리고 그것을 볼 BO 화면 넷.
 
-> **다음에 이어서 하려면** [`docs/HANDOFF-2026-09-18.md`](docs/HANDOFF-2026-09-18.md)
-> 부터 읽으십시오 — 지금 어디까지 왔고 다음에 무엇을 집을지, 그리고
-> "모든 것을 공통으로"라는 방향을 어디에 쓰고 어디에 쓰면 안 되는지가
-> 정리돼 있습니다.
+> **지금 어떻게 동작하는지는** [`docs/FLOW.md`](docs/FLOW.md) 한 곳에 있습니다 —
+> 단말과 서버, 기기 신원(페어링·토큰), 주문의 일생, KIOSK, 라벨, 셸, 켜는 스위치.
+>
+> **다음에 이어서 하려면** 가장 최근의 [`docs/HANDOFF-2026-09-29.md`](docs/HANDOFF-2026-09-29.md)
+> 부터 읽으십시오 (그 앞은 [09-27](docs/HANDOFF-2026-09-27.md) ·
+> [09-24](docs/HANDOFF-2026-09-24.md) · [09-18](docs/HANDOFF-2026-09-18.md) —
+> "모든 것을 공통으로" 라는 방향을 어디에 쓰고 어디에 쓰면 안 되는지는 09-18 에).
+>
+> 매장 단말 셸(Electron)은 별도 저장소 `sun-moon-store-app` 입니다. 설계:
+> [`docs/design/store-app.md`](docs/design/store-app.md) · 손님 앱:
+> [`docs/design/customer-app.md`](docs/design/customer-app.md).
 
 The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
 own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
