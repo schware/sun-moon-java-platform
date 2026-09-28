@@ -228,7 +228,11 @@ public final class Bootstrap {
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiGuard.protect(apiRoutes(eventPublisher, terminals, orderClient,
                                 appServerClient, sales, etcLogs, posBusiness, posLive, posMasters,
-                                posPrograms, posNotices, reprocess, new PairingEndpoints(pairing),
+                                posPrograms, posNotices, reprocess, new PairingEndpoints(pairing,
+                                        new com.sunmoon.platform.domain.pairing.KioskPins(salesDataSource == null
+                                                ? com.sunmoon.platform.infrastructure.pairing.JdbcKioskPinStore.inMemory()
+                                                : new com.sunmoon.platform.infrastructure.pairing.JdbcKioskPinStore(salesDataSource),
+                                                java.time.Clock.systemUTC())),
                                 kdsAuthority, printJobs == null ? null
                                         : new com.sunmoon.platform.api.PrintEndpoints(
                                                 printJobs, boPrinters, labelPush, kdsAuthority))),
@@ -427,6 +431,9 @@ public final class Bootstrap {
                 Map.entry(new RouteKey(HttpMethod.POST, "/pos/pair"), pairing.pair()),
                 Map.entry(new RouteKey(HttpMethod.POST, "/pos/devices/revoke"), pairing.revoke()),
                 Map.entry(new RouteKey(HttpMethod.GET, "/pos/devices"), pairing.list()),
+                // KIOSK 관리자 PIN (§5.3) — BO 가 정하고, 셸이 물어 확인.
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/devices/kiosk-pin"), pairing.setKioskPin()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/kiosk/unlock"), pairing.unlockKiosk()),
 
                 Map.entry(new RouteKey(HttpMethod.GET, "/pos/time"),
                         posEndpoints == null ? noPosStore() : posEndpoints.serverTime()),

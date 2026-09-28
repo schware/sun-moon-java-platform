@@ -86,7 +86,7 @@ public final class ApiGuard {
                 "/pos/masters/ack", "/pos/programs/ack", "/pos/notices/ack",
                 "/business-days/open", "/business-days/close",
                 "/orders/start", "/orders/force-produced", "/orders/kiosk",
-                "/pos/print-jobs/ack", "/pos/print-jobs/reprint"}) {
+                "/pos/print-jobs/ack", "/pos/print-jobs/reprint", "/pos/kiosk/unlock"}) {
             put(HttpMethod.POST, path, Audience.TERMINAL);
         }
         for (String path : new String[] {
@@ -108,7 +108,7 @@ public final class ApiGuard {
         for (String path : new String[] {
                 "/terminals/push", "/terminals/broadcast", "/pos/masters/version",
                 "/reprocess/one", "/reprocess/all", "/pos/programs/release", "/pos/notices",
-                "/orders/legacy", "/pos/pairing-codes", "/pos/devices/revoke"}) {
+                "/orders/legacy", "/pos/pairing-codes", "/pos/devices/revoke", "/pos/devices/kiosk-pin"}) {
             put(HttpMethod.POST, path, Audience.ADMIN);
         }
     }

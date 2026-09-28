@@ -34,10 +34,67 @@ public final class PairingEndpoints {
     private static final Logger log = LoggerFactory.getLogger(PairingEndpoints.class);
 
     private final PairingService pairing;
+    private final com.sunmoon.platform.domain.pairing.KioskPins kioskPins;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PairingEndpoints(PairingService pairing) {
+        this(pairing, null);
+    }
+
+    public PairingEndpoints(PairingService pairing, com.sunmoon.platform.domain.pairing.KioskPins kioskPins) {
         this.pairing = pairing;
+        this.kioskPins = kioskPins;
+    }
+
+    /**
+     * {@code POST /pos/devices/kiosk-pin} (관리) — BO 가 KIOSK 관리자 PIN 을 정합니다.
+     * 본문 {@code {storeId, deviceId, pin, setBy}}. 해시만 저장합니다.
+     */
+    public RestEndpoint setKioskPin() {
+        return request -> {
+            JsonNode body = json(request);
+            if (body == null || kioskPins == null) {
+                return bad("본문이 JSON 이 아닙니다");
+            }
+            String storeId = text(body, "storeId");
+            String deviceId = text(body, "deviceId");
+            if (storeId == null || deviceId == null) {
+                return bad("storeId, deviceId 가 필요합니다");
+            }
+            try {
+                kioskPins.set(storeId, deviceId, text(body, "pin"), text(body, "setBy"));
+            } catch (IllegalArgumentException invalid) {
+                return bad(invalid.getMessage());
+            }
+            log.info("KIOSK 관리자 PIN 설정: {} {} ({})", storeId, deviceId, text(body, "setBy"));
+            return JsonResponses.of(HttpResponseStatus.OK, Map.of("set", true));
+        };
+    }
+
+    /**
+     * {@code POST /pos/kiosk/unlock} (단말, KIOSK 만) — 셸이 관리자 PIN 을 확인합니다.
+     * 기기마다 10분에 5번 틀리면 그 10분 동안 423.
+     */
+    public RestEndpoint unlockKiosk() {
+        return request -> {
+            java.util.Optional<DeviceIdentity> device = com.sunmoon.platform.api.auth.ApiGuard.currentDevice();
+            if (device.isEmpty() || !"KIOSK".equals(device.get().type()) || kioskPins == null) {
+                return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", "페어링된 KIOSK 만"));
+            }
+            JsonNode body = json(request);
+            String pin = body == null ? null : text(body, "pin");
+            var result = kioskPins.check(device.get().storeId(), device.get().deviceId(), pin);
+            log.info("KIOSK 관리자 잠금 해제 시도: {} {} → {}", device.get().storeId(), device.get().deviceId(), result);
+            return switch (result) {
+                case OK -> JsonResponses.of(HttpResponseStatus.OK, Map.of("ok", true));
+                case WRONG -> JsonResponses.of(HttpResponseStatus.FORBIDDEN,
+                        Map.of("ok", false, "error", "PIN 이 맞지 않습니다"));
+                case NOT_SET -> JsonResponses.of(HttpResponseStatus.CONFLICT,
+                        Map.of("ok", false, "error", "이 KIOSK 에는 관리자 PIN 이 없습니다 — BO 장비 화면에서 정하십시오"));
+                case LOCKED -> JsonResponses.of(HttpResponseStatus.valueOf(423),
+                        Map.of("ok", false, "error", "잘못된 PIN 이 여러 번 들어왔습니다. 10분 뒤 다시 하십시오"));
+            };
+        };
     }
 
     public RestEndpoint issueCode() {
