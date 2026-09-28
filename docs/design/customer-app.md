@@ -307,7 +307,7 @@ iOS Universal Links 모두 **도메인에 검증 파일**을 올려야 합니다
 |---|---|---|---|
 | **A0** | OMS 공개 닫기(sudo, 밖에서 확인) + channel-order CORS | ufw, channel-order | — |
 | **A1** | 플랫폼 층 (웹 동작 그대로) | channel-order | — |
-| **A2** | 회원 토큰 + 이력 + 기기 연결 + claim_token 원장 기록 | APP-SERVER, Order(owner 주소), channel-order | A0 |
+| **A2** ✅ | 회원 토큰 + 이력 + 기기 연결 + claim_token 원장 기록 — 2026-09-29 (Order `1b5cf9a`, APP-SERVER `dcd4363`, channel-order `194a73a`). claim_token 은 `app_order_header` 가 아니라 **`app_oms_order_map`** 에(OMS 가 돌려준 값끼리 한 곳에) | APP-SERVER, Order(owner 주소), channel-order | A0 |
 | **A3** | Android 앱 껍데기 (APK) | — | A0, A1 |
 | **A4** | 푸시 (Redis 구독 + FCM) | APP-SERVER, 앱 | A2, A3 |
 | **A5** | iOS | — | 도메인·TLS, Mac |
