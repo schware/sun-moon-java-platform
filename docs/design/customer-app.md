@@ -44,7 +44,7 @@
 
 > **했습니다.** 공개 규칙을 지우고 LAN 전용으로 바꿨고, LTE 로 밖에서 안 열리는
 > 것을 확인했습니다. 서버 안의 호출은 전부 정상입니다. 아래는 왜 닫았는지의
-> 기록으로 남깁니다. **§1.2 (CORS) 는 아직입니다.**
+> 기록으로 남깁니다. **§1.2 (CORS) 도 2026-09-28 구현했습니다**(channel-order `0a9eefa`).
 
 **OMS 는 지금 공개(`ufw allow 8083/tcp`)이고 인증이 없습니다.** 그래서
 인터넷에서:
@@ -71,7 +71,11 @@ sudo ufw allow from 192.168.0.0/24 to any port 8083 proto tcp   # LAN 에서 Swa
 같은 이유로 **KDS(8081)·Delivery(8082)** 도 공개인지 보고, 밖에서 부를 쪽이
 없으면 같이 닫습니다.
 
-### 1.2 channel-order CORS
+### 1.2 channel-order CORS — ✅ 2026-09-28 구현·배포 (channel-order `0a9eefa`)
+
+> `CorsConfig` — `/api/**` 에 GET·POST, 헤더 `Content-Type, Authorization`,
+> 적힌 출처만. 값에 `*` 가 섞이면 **그 값은 버립니다**(오타 하나로 전부 열리지
+> 않게). 시험 4개(`CorsTest`). 기본값을 쓰므로 기동 스크립트에 env 를 더하지 않았습니다.
 
 모바일 앱의 화면은 `https://localhost`(Android) / `capacitor://localhost`(iOS)
 에서 돕니다. channel-order 입장에서 **다른 출처**라 CORS 가 필요합니다.
