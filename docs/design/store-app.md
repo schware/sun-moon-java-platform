@@ -15,8 +15,9 @@
 | **2** KDS-MAIN 권한 | ✅ 구현. Order V15 배포, Device Server·BO·KDS 배포 중 (아래 확인 참고) | Order `c850d98`, Device Server `c448f09` `c47b2a0`, BO `6b85b1e`, KDS `783e295` |
 | **3** Electron 셸 | ✅ 구현. 설치 파일은 아직 안 만듦(`npm run dist`). 창 없는 점검(`SUNMOON_SMOKE`)으로 공인 주소 페어링→암호화 저장→화면이 토큰으로 `/orders` 200→외부 fetch 차단까지 확인 | 셸 `0c88cc8` (새 저장소 `sun-moon-store-app`, private), 단말 KDS `6e2e8b0` POS `bb58eee` DID `466fcee` |
 | **4** 원장·결제 | ✅ §6.2 배포(Order V16, APP-SERVER, POS). §6.1 셸 SQLite 원장 구현 — 창 없는 점검으로 확인 | Order `7b23e38`, APP-SERVER `0d7dc2b`, POS `84e6c50` `cdef65b`, 셸 `73c96de` |
-| **5** 프린터·라벨 | 🔶 구현. Device Server 배포 대기, 실물 프린터 없음(가짜 프린터로 확인 예정) | Device Server `778f3cb` `0db98e6`, 셸 `43a1e46`, KDS `a6ae52d`, POS `dcd31ec`, Debian-Setting `6307583` |
-| 6~8 | 아직 | — |
+| **5** 프린터·라벨 | ✅ 배포. 시험 매장으로 끝까지 확인(2026-09-28): 아메리카노 3 + 라떼 1 → 강제 완료 → 라벨 작업 4개 QUEUED → 셸(KDS-MAIN)이 가짜 프린터로 4장(CP949, "2 / 3") → PRINTED. 재출력은 MAIN 만(POS 403), content 복사 + copyNo 1, 2. 재처리에 PRINT. **실물 프린터는 아직** | Device Server `778f3cb` `0db98e6`, 셸 `43a1e46`, KDS `a6ae52d`, POS `dcd31ec`, Debian-Setting `6307583` |
+| **6** 화면 번들 업데이트 | ✅ 구현, **기본 꺼짐**(`SUNMOON_UI_UPDATES=on`) — §11 대로 enforce 뒤에 켬. 서명 키는 빌드 PC 에만(secrets.md H). 셸 자체 업데이트(§8.2)는 코드 서명 뒤 | 셸 `7edb66f`, Debian-Setting `5df0969` |
+| 7~8 | 아직 | — |
 
 **설계와 달라진 것 (구현하면서 정한 것):**
 
@@ -75,6 +76,13 @@
 - (5단계) 한 주문의 라벨은 **최대 60장** — 수량 오타(999잔)로 프린터가 한 시간 도는 것을 막음.
 - (5단계) 한국 모델 ESC/POS 의 2바이트 모드(`FS &`) + CP949 를 가정했습니다. 다른 프린터면
   `escpos.ts` 만 바꾸면 됩니다. **실물 프린터로는 아직 확인하지 않았습니다.**
+- (6단계) 번들 형식은 zip 이 아니라 **gzip(JSON {screen, version, files})** 입니다 — zip 을
+  풀려면 라이브러리가 필요하고, 셸 main 에 들어가는 의존성은 적을수록 좋습니다. 서명은 묶음
+  바이트 전체에 대한 ed25519, checksum(SHA-256)도 따로 확인합니다.
+- (6단계) 적용은 **셸이 시작할 때만**입니다. 새벽 4시 새로 띄우기는 화면만 다시 여는 것이라
+  번들을 바꾸지 않습니다 — 영업 중에 화면이 바뀌는 일이 없습니다.
+- (6단계) 받는 주소(packageUrl)의 호스트를 제한하지 않았습니다. 서명이 맞아야 풀리므로 어디서
+  받든 같고, 제한하면 CDN 등으로 옮길 때 셸을 다시 깔아야 합니다.
 - (3단계) 새벽 4시 화면 새로 띄우기는 **시각 기준**입니다(설계는 "마감 뒤"). 마감 여부를
   셸이 알려면 영업일 상태를 물어야 해서, 대부분 매장의 마감 뒤·개점 전인 시각으로 정했습니다.
 
