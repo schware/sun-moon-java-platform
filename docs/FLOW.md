@@ -217,7 +217,7 @@ FAILED ─→ BO 재처리의 다섯 번째 종류 PRINT ─→ 다시 줄 세�
 | 채널 | 누가 냄 | 누가 들음 | 무엇에 쓰나 |
 |---|---|---|---|
 | Redis `order-events` | OMS | Device Server | 단말에 push (POS·KDS·DID), **라벨 작업 만들기** |
-| Redis `order-events` | OMS | APP-SERVER (A4 에서) | 손님 앱 푸시 |
+| Redis `order-events` | OMS | APP-SERVER (A4, **꺼져 있음**) | 손님 앱 푸시 — `PUSH_EVENTS_REDIS`·FCM 설정이 있어야 |
 | Redis `menu-events` | BO | Device Server | 결품·메뉴 바뀜 → 단말이 다시 읽음 |
 | WebSocket | Device Server | 단말 | "바뀌었다" 신호, 긴급 공지, **PRINT** |
 
@@ -248,6 +248,7 @@ FAILED ─→ BO 재처리의 다섯 번째 종류 PRINT ─→ 다시 줄 세�
 | `DEVICE_DIRECTORY` | Device Server run 줄 | `bo` | — |
 | `APP_CORS_ORIGINS` | channel-order | 기본값(`https://localhost, capacitor://localhost`) | 앱 출처가 바뀌면 |
 | `SUNMOON_UI_UPDATES` | 셸 환경 | 꺼짐 | **`API_AUTH=enforce` 뒤에** `on` |
+| `PUSH_EVENTS_REDIS`, `FCM_PROJECT_ID`, `FCM_CREDENTIALS_FILE` | APP-SERVER run 줄 | 없음(푸시 꺼짐) | Firebase 프로젝트와 앱(A3)이 생기면 — `secrets.md` I |
 
 Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼먹으면** 인증이 조용히 기본값이
 됩니다 — `bin/docker-start-all.sh` 의 줄을 그대로 쓰십시오.
@@ -259,8 +260,8 @@ Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼�
 - **`API_AUTH=enforce`** — 매장 단말을 페어링으로 옮긴 뒤(Sun&Moon 결정)
 - **실물 프린터** 확인, 코드 서명 인증서(그 뒤 셸 자체 업데이트)
 - 진짜 VAN (그때 KIOSK 는 결제수단 확인을 승인 **전**으로)
-- 손님 앱 A3(Android 껍데기 — Android SDK 필요) · A4(푸시 — Firebase 프로젝트 필요). 서버 쪽 준비
-  (`/members/me/push-token`, `member_device.push_token`)는 되어 있습니다
+- 손님 앱 A3(Android 껍데기 — Android SDK 필요) · A4 앱 쪽(푸시 권한·토큰 등록 — Firebase 프로젝트 필요).
+  A4 **서버 쪽은 구현**돼 있고 설정이 없어 꺼져 있습니다
 - 단말 코드 공통화(8단계, 선택) — 지금 `pairing.ts` 는 세 저장소에 같은 복사본
 
 ---

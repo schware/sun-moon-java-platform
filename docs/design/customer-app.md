@@ -309,7 +309,7 @@ iOS Universal Links 모두 **도메인에 검증 파일**을 올려야 합니다
 | **A1** | 플랫폼 층 (웹 동작 그대로) | channel-order | — |
 | **A2** ✅ | 회원 토큰 + 이력 + 기기 연결 + claim_token 원장 기록 — 2026-09-29 (Order `1b5cf9a`, APP-SERVER `dcd4363`, channel-order `194a73a`). claim_token 은 `app_order_header` 가 아니라 **`app_oms_order_map`** 에(OMS 가 돌려준 값끼리 한 곳에) | APP-SERVER, Order(owner 주소), channel-order | A0 |
 | **A3** | Android 앱 껍데기 (APK) | — | A0, A1 |
-| **A4** | 푸시 (Redis 구독 + FCM) | APP-SERVER, 앱 | A2, A3 |
+| **A4** 🔶 | 푸시 (Redis 구독 + FCM) — **서버 쪽 구현**(APP-SERVER `fd203dd`): 구독·대상 고르기·문구·FCM 발송·없는 토큰 지우기. **꺼져 있음** — `PUSH_EVENTS_REDIS=true` 와 `FCM_PROJECT_ID`·`FCM_CREDENTIALS_FILE` 이 있어야 켜짐. FCM 은 `google-auth-library` 대신 JDK 만으로(서비스 계정 JWT). Spring Data Redis(Order 와 같은 것)로 구독 — 설계의 redisson 대신. 앱 쪽(권한·토큰 등록)은 A3 뒤 | APP-SERVER, 앱 | A2, A3 |
 | **A5** | iOS | — | 도메인·TLS, Mac |
 | **A6** | 딥링크 | — | 도메인 |
 | **K** | 키오스크 화면 모드 | channel-order, 셸 | store-app 7단계 |
