@@ -62,16 +62,49 @@ public final class OrderProxyEndpoints {
         return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", reason));
     }
 
-    /** {@code GET /orders?status=PLACED} — the list a POS terminal works from. */
+    /**
+     * {@code GET /orders?status=PLACED} — the list a POS terminal works from.
+     *
+     * <p><b>페어링된 POS·KDS 에는 자기 매장 주문만</b> 줍니다 (2026-09-28). 그전에는
+     * 전 매장 주문이 단말로 가고 화면이 자기 매장만 걸러 봤습니다 — 이 서버가
+     * 공개라, 거르는 쪽이 화면이면 거르지 않는 누군가도 전부를 받습니다.
+     * DID 는 여러 매장을 볼 수 있어 거르지 않습니다. 페어링 전 단말은 예전 그대로.
+     */
     public RestEndpoint list() {
         return request -> {
             String status = param(request.uri(), "status");
             try {
-                return passThrough(orders.listOrders(status));
+                HttpResponse<String> upstream = orders.listOrders(status);
+                java.util.Optional<DeviceIdentity> device = ApiGuard.currentDevice();
+                if (device.isEmpty() || "DID".equals(device.get().type()) || upstream.statusCode() != 200) {
+                    return passThrough(upstream);
+                }
+                return ownStoreOnly(upstream.body(), device.get().storeId());
             } catch (Exception e) {
                 return unreachable(e);
             }
         };
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    static FullHttpResponse ownStoreOnly(String body, String storeId) throws java.io.IOException {
+        com.fasterxml.jackson.databind.JsonNode all = JSON.readTree(body);
+        com.fasterxml.jackson.databind.node.ArrayNode mine = JSON.createArrayNode();
+        if (all != null && all.isArray()) {
+            for (com.fasterxml.jackson.databind.JsonNode order : all) {
+                if (storeId.equals(order.path("storeId").asText(null))) {
+                    mine.add(order);
+                }
+            }
+        }
+        byte[] bytes = JSON.writeValueAsBytes(mine);
+        FullHttpResponse response = new DefaultFullHttpResponse(
+                HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(bytes));
+        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
+        response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
+        return response;
     }
 
     /**
