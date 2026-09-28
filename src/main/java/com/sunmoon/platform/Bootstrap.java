@@ -10,6 +10,7 @@ import com.sunmoon.platform.api.PosOperationEndpoints;
 import com.sunmoon.platform.api.PosSystemEndpoints;
 import com.sunmoon.platform.api.ReprocessEndpoints;
 import com.sunmoon.platform.api.SaleEndpoints;
+import com.sunmoon.platform.api.KdsAuthority;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
 import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
@@ -183,6 +184,18 @@ public final class Bootstrap {
         AppServerClient appServerClient = new AppServerClient(config.appServerUrl());
         subscribeToEvents(config, terminals, orderClient);
 
+        // 주방의 명령은 KDS-MAIN 이 (§4.2). MAIN 이 언제까지 붙어 있었는지를 5초마다 적습니다.
+        KdsAuthority kdsAuthority = new KdsAuthority(terminals, config.terminalGrace(), java.time.Clock.systemUTC());
+        Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().name("kds-main-watch").daemon(true).factory())
+                .scheduleAtFixedRate(() -> {
+                    try {
+                        kdsAuthority.observe();
+                    } catch (RuntimeException e) {
+                        log.warn("KDS-MAIN 연결 확인 실패", e);
+                    }
+                }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
+
         // HTTP 주소마다 누가 불러도 되는지 (store-app.md §2.2). 기본 warn — 막지 않고 적습니다.
         // 기기 토큰은 페어링이 발급합니다 (§3). 데이터베이스가 없으면 기억만 — 재기동하면 다시 페어링.
         PairingService pairing = new PairingService(salesDataSource == null
@@ -196,7 +209,8 @@ public final class Bootstrap {
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiGuard.protect(apiRoutes(eventPublisher, terminals, orderClient,
                                 appServerClient, sales, etcLogs, posBusiness, posLive, posMasters,
-                                posPrograms, posNotices, reprocess, new PairingEndpoints(pairing))),
+                                posPrograms, posNotices, reprocess, new PairingEndpoints(pairing),
+                                kdsAuthority)),
                         blockingWorkExecutor, directory, terminals, apiGuard)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
@@ -278,10 +292,10 @@ public final class Bootstrap {
             com.sunmoon.platform.domain.intake.RawLogStore etcLogs,
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
             ProgramDeployService posPrograms, NoticeService posNotices,
-            ReprocessService reprocess, PairingEndpoints pairing) {
+            ReprocessService reprocess, PairingEndpoints pairing, KdsAuthority kdsAuthority) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
-        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient);
+        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient, kdsAuthority);
         MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
         SaleEndpoints saleEndpoints = sales == null ? null : new SaleEndpoints(sales);
         com.sunmoon.platform.api.EtcSaleEndpoints etcEndpoints =
@@ -313,6 +327,10 @@ public final class Bootstrap {
                 // 재호출 — DID에 번호를 다시 띄웁니다. 상태 전이가
                 // 아닙니다: 한 번 부르든 다섯 번 부르든 PRODUCED 입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/recall"), orderEndpoints.recall()),
+                // KDS-MAIN 의 권한 (store-app.md §4). 역할 확인은 KdsAuthority.
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/start"), orderEndpoints.start()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/orders/force-produced"), orderEndpoints.forceProduced()),
+                Map.entry(new RouteKey(HttpMethod.GET, "/kds/mode"), orderEndpoints.kdsMode()),
 
                 // POS 수신 완료 — 상태 전이가 아니라 전달 사실입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/received"), orderEndpoints.markReceived()),

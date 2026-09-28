@@ -70,11 +70,31 @@ public final class OrderClient {
      */
     public HttpResponse<String> handOver(long orderId, String pin, String deviceId, boolean override)
             throws Exception {
+        return handOver(orderId, pin, deviceId, override, false);
+    }
+
+    /** @param emergency KDS-MAIN 이 끊긴 동안 SUB 가 내주는가 — 이 서버가 판단해서 적어 보냅니다. */
+    public HttpResponse<String> handOver(long orderId, String pin, String deviceId, boolean override,
+                                         boolean emergency) throws Exception {
         String body = "{\"pin\":" + json(pin) + ",\"deviceId\":" + json(deviceId)
-                + ",\"override\":" + override + "}";
+                + ",\"override\":" + override + ",\"emergency\":" + emergency + "}";
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/pickup"))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body)));
+    }
+
+    /** {@code POST /orders/{id}/start} — 그 주방의 줄만 조리 시작 (store-app.md §4.1). */
+    public HttpResponse<String> start(long orderId, String deviceId) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/start?deviceId="
+                        + java.net.URLEncoder.encode(deviceId, java.nio.charset.StandardCharsets.UTF_8)))
+                .POST(HttpRequest.BodyPublishers.noBody()));
+    }
+
+    /** {@code POST /orders/{id}/force-produced} — KDS-MAIN 의 강제 전부 완료. */
+    public HttpResponse<String> forceProduced(long orderId, String deviceId) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/force-produced?deviceId="
+                        + java.net.URLEncoder.encode(deviceId, java.nio.charset.StandardCharsets.UTF_8)))
+                .POST(HttpRequest.BodyPublishers.noBody()));
     }
 
     /**

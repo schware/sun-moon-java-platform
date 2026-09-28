@@ -1,5 +1,7 @@
 package com.sunmoon.platform.api;
 
+import com.sunmoon.platform.api.auth.ApiGuard;
+import com.sunmoon.platform.domain.pairing.DeviceIdentity;
 import com.sunmoon.platform.infrastructure.order.OrderClient;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
@@ -37,9 +39,27 @@ public final class OrderProxyEndpoints {
     private static final Logger log = LoggerFactory.getLogger(OrderProxyEndpoints.class);
 
     private final OrderClient orders;
+    private final KdsAuthority kds;
 
     public OrderProxyEndpoints(OrderClient orders) {
+        this(orders, KdsAuthority.permissive());
+    }
+
+    public OrderProxyEndpoints(OrderClient orders, KdsAuthority kds) {
         this.orders = orders;
+        this.kds = kds;
+    }
+
+    /**
+     * 누가 눌렀나. 페어링된 기기면 <b>토큰의 기기</b>이고 쿼리의 {@code deviceId} 는
+     * 무시합니다(store-app.md §3.5) — 쿼리는 아무나 아무 값이나 적을 수 있습니다.
+     */
+    private static String caller(String uri) {
+        return ApiGuard.currentDevice().map(DeviceIdentity::deviceId).orElse(param(uri, "deviceId"));
+    }
+
+    private static FullHttpResponse forbidden(String reason) {
+        return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", reason));
     }
 
     /** {@code GET /orders?status=PLACED} — the list a POS terminal works from. */
@@ -70,7 +90,7 @@ public final class OrderProxyEndpoints {
         return request -> {
             String rawId = param(request.uri(), "id");
             String status = param(request.uri(), "status");
-            String deviceId = param(request.uri(), "deviceId");
+            String deviceId = caller(request.uri());
 
             if (rawId == null || status == null) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
@@ -118,9 +138,14 @@ public final class OrderProxyEndpoints {
                 // 번호를 볼지 말지는 Order 의 규칙이고, 여기서 한 번 더
                 // 거르면 같은 규칙이 두 곳에 생깁니다.
                 boolean override = "true".equalsIgnoreCase(param(request.uri(), "override"));
+                // 역할은 이 서버가 봅니다 — 역할을 아는 것은 연결을 쥔 쪽뿐입니다 (§4.2).
+                KdsAuthority.Decision decision = kds.decide(KdsAuthority.Action.PICKUP, ApiGuard.currentDevice());
+                if (!decision.allowed()) {
+                    return forbidden(decision.reason());
+                }
                 return passThrough(orders.handOver(
                         orderId, param(request.uri(), "pin"),
-                        param(request.uri(), "deviceId"), override));
+                        caller(request.uri()), override, decision.emergency()));
             } catch (Exception e) {
                 return unreachable(e);
             }
@@ -147,6 +172,10 @@ public final class OrderProxyEndpoints {
             } catch (NumberFormatException notANumber) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
             }
+            KdsAuthority.Decision decision = kds.decide(KdsAuthority.Action.RECALL, ApiGuard.currentDevice());
+            if (!decision.allowed()) {
+                return forbidden(decision.reason());
+            }
             try {
                 return passThrough(orders.recall(orderId));
             } catch (Exception e) {
@@ -165,7 +194,7 @@ public final class OrderProxyEndpoints {
     public RestEndpoint markReceived() {
         return request -> {
             String rawId = param(request.uri(), "id");
-            String deviceId = param(request.uri(), "deviceId");
+            String deviceId = caller(request.uri());
             if (rawId == null || deviceId == null) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
                         Map.of("error", "id and deviceId are required"));
@@ -185,6 +214,80 @@ public final class OrderProxyEndpoints {
     }
 
     /** {@code GET /business-days/status?storeId=store-01} — whether that store has 개점'd. */
+    /**
+     * {@code POST /orders/start?id=&deviceId=} — 그 주방의 줄만 조리 시작 (§4.1).
+     * SUB 의 일이라 역할을 따지지 않습니다. 어느 줄인지는 누른 기기가 정합니다.
+     */
+    public RestEndpoint start() {
+        return request -> {
+            Long orderId = orderId(request.uri());
+            String deviceId = caller(request.uri());
+            if (orderId == null || deviceId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "id(숫자)와 deviceId 가 필요합니다"));
+            }
+            try {
+                return passThrough(orders.start(orderId, deviceId));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
+    /** {@code POST /orders/force-produced?id=} — KDS-MAIN 의 강제 전부 완료 (§4.1). */
+    public RestEndpoint forceProduced() {
+        return request -> {
+            Long orderId = orderId(request.uri());
+            String deviceId = caller(request.uri());
+            if (orderId == null || deviceId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "id(숫자)와 deviceId 가 필요합니다"));
+            }
+            KdsAuthority.Decision decision =
+                    kds.decide(KdsAuthority.Action.FORCE_PRODUCED, ApiGuard.currentDevice());
+            if (!decision.allowed()) {
+                return forbidden(decision.reason());
+            }
+            try {
+                return passThrough(orders.forceProduced(orderId, deviceId));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+        };
+    }
+
+    /**
+     * {@code GET /kds/mode?storeId=} — 이 매장이 비상 모드인가 (§4.2).
+     * SUB 화면은 비상일 때만 수령 칸을 띄웁니다. 페어링된 기기면 자기 매장.
+     */
+    public RestEndpoint kdsMode() {
+        return request -> {
+            String storeId = ApiGuard.currentDevice().map(DeviceIdentity::storeId)
+                    .orElse(param(request.uri(), "storeId"));
+            if (storeId == null || storeId.isBlank()) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "storeId is required"));
+            }
+            KdsAuthority.Mode mode = kds.mode(storeId);
+            Map<String, Object> body = new java.util.LinkedHashMap<>();
+            body.put("storeId", storeId);
+            body.put("emergency", mode.emergency());
+            body.put("since", mode.since() == null ? null : mode.since().toString());
+            return JsonResponses.of(HttpResponseStatus.OK, body);
+        };
+    }
+
+    private static Long orderId(String uri) {
+        String raw = param(uri, "id");
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return Long.parseLong(raw);
+        } catch (NumberFormatException notANumber) {
+            return null;
+        }
+    }
+
     public RestEndpoint businessDayStatus() {
         return request -> {
             String storeId = param(request.uri(), "storeId");
