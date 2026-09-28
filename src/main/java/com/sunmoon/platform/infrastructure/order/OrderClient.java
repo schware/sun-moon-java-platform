@@ -83,6 +83,11 @@ public final class OrderClient {
                 .POST(HttpRequest.BodyPublishers.ofString(body)));
     }
 
+    /** {@code GET /orders/{id}} — 주문 한 건. 페어링된 기기가 자기 매장 주문을 만지는지 볼 때 씁니다. */
+    public HttpResponse<String> order(long orderId) throws Exception {
+        return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId)).GET());
+    }
+
     /** {@code POST /orders/{id}/start} — 그 주방의 줄만 조리 시작 (store-app.md §4.1). */
     public HttpResponse<String> start(long orderId, String deviceId) throws Exception {
         return send(HttpRequest.newBuilder(URI.create(baseUrl + "/orders/" + orderId + "/start?deviceId="

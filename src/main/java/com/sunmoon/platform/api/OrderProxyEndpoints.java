@@ -58,6 +58,26 @@ public final class OrderProxyEndpoints {
         return ApiGuard.currentDevice().map(DeviceIdentity::deviceId).orElse(param(uri, "deviceId"));
     }
 
+    /**
+     * 페어링된 기기가 <b>다른 매장의 주문</b>을 만지려 하면 403 을 돌려줍니다.
+     *
+     * <p>주문 id 는 쿼리에 있어서 아무 값이나 적을 수 있습니다. 매장을 아는 요청(토큰)은
+     * 그 주문이 자기 매장 것인지 한 번 더 읽고 확인합니다. 신원이 없거나 DID(여러 매장)면
+     * 확인하지 않고, 주문을 못 읽으면(404 등) 원래 호출이 그 답을 하게 둡니다.
+     */
+    private FullHttpResponse otherStore(long orderId) throws Exception {
+        java.util.Optional<DeviceIdentity> device = ApiGuard.currentDevice();
+        if (device.isEmpty() || "DID".equals(device.get().type())) {
+            return null;
+        }
+        HttpResponse<String> found = orders.order(orderId);
+        if (found.statusCode() != 200) {
+            return null;
+        }
+        String store = JSON.readTree(found.body()).path("storeId").asText(null);
+        return device.get().storeId().equals(store) ? null : forbidden("다른 매장의 주문입니다");
+    }
+
     private static FullHttpResponse forbidden(String reason) {
         return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", reason));
     }
@@ -139,6 +159,9 @@ public final class OrderProxyEndpoints {
             try {
                 // A 409 from Order means the move was not allowed — that is
                 // an answer, not a failure, and it reaches the terminal intact.
+                if (otherStore(orderId) instanceof FullHttpResponse refused) {
+                    return refused;
+                }
                 return passThrough(orders.changeStatus(
                         orderId, status, deviceId, param(request.uri(), "tranNo")));
             } catch (Exception e) {
@@ -176,6 +199,9 @@ public final class OrderProxyEndpoints {
                 if (!decision.allowed()) {
                     return forbidden(decision.reason());
                 }
+                if (otherStore(orderId) instanceof FullHttpResponse refused) {
+                    return refused;
+                }
                 return passThrough(orders.handOver(
                         orderId, param(request.uri(), "pin"),
                         caller(request.uri()), override, decision.emergency()));
@@ -210,6 +236,9 @@ public final class OrderProxyEndpoints {
                 return forbidden(decision.reason());
             }
             try {
+                if (otherStore(orderId) instanceof FullHttpResponse refused) {
+                    return refused;
+                }
                 return passThrough(orders.recall(orderId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -239,6 +268,9 @@ public final class OrderProxyEndpoints {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
             }
             try {
+                if (otherStore(orderId) instanceof FullHttpResponse refused) {
+                    return refused;
+                }
                 return passThrough(orders.markReceived(orderId, deviceId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -260,6 +292,9 @@ public final class OrderProxyEndpoints {
                         Map.of("error", "id(숫자)와 deviceId 가 필요합니다"));
             }
             try {
+                if (otherStore(orderId) instanceof FullHttpResponse refused) {
+                    return refused;
+                }
                 return passThrough(orders.start(orderId, deviceId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -282,6 +317,9 @@ public final class OrderProxyEndpoints {
                 return forbidden(decision.reason());
             }
             try {
+                if (otherStore(orderId) instanceof FullHttpResponse refused) {
+                    return refused;
+                }
                 return passThrough(orders.forceProduced(orderId, deviceId));
             } catch (Exception e) {
                 return unreachable(e);
