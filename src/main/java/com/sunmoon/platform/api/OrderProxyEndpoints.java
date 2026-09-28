@@ -40,14 +40,22 @@ public final class OrderProxyEndpoints {
 
     private final OrderClient orders;
     private final KdsAuthority kds;
+    /** KIOSK 주문의 값을 매길 메뉴판 (§9). 없으면 KIOSK 주문을 받지 않습니다. */
+    private final com.sunmoon.platform.infrastructure.appserver.AppServerClient menuBoard;
 
     public OrderProxyEndpoints(OrderClient orders) {
         this(orders, KdsAuthority.permissive());
     }
 
     public OrderProxyEndpoints(OrderClient orders, KdsAuthority kds) {
+        this(orders, kds, null);
+    }
+
+    public OrderProxyEndpoints(OrderClient orders, KdsAuthority kds,
+                               com.sunmoon.platform.infrastructure.appserver.AppServerClient menuBoard) {
         this.orders = orders;
         this.kds = kds;
+        this.menuBoard = menuBoard;
     }
 
     /**
@@ -376,11 +384,36 @@ public final class OrderProxyEndpoints {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
                         Map.of("error", "lines 와 tranNo 가 필요합니다"));
             }
+            // 값은 메뉴판에서 — 화면이 보낸 단가·이름·주방은 쓰지 않습니다.
+            if (menuBoard == null) {
+                return JsonResponses.of(HttpResponseStatus.SERVICE_UNAVAILABLE,
+                        Map.of("error", "메뉴판에 연결되지 않아 KIOSK 주문을 받을 수 없습니다"));
+            }
+            KioskPricing.Result priced;
+            try {
+                HttpResponse<String> board = menuBoard.menus(device.get().storeId(), null);
+                if (board.statusCode() != 200) {
+                    return JsonResponses.of(HttpResponseStatus.BAD_GATEWAY,
+                            Map.of("error", "메뉴판을 읽지 못했습니다 (" + board.statusCode() + ")"));
+                }
+                priced = KioskPricing.price(body.get("lines"), JSON.readTree(board.body()));
+            } catch (Exception e) {
+                return unreachable(e);
+            }
+            if (priced.refusal() != null) {
+                return JsonResponses.of(HttpResponseStatus.CONFLICT, Map.of("error", priced.refusal()));
+            }
+            long total = KioskPricing.total(priced.lines());
+            if (body.hasNonNull("payment")
+                    && Math.round(body.path("payment").path("amount").asDouble(-1)) != total) {
+                return JsonResponses.of(HttpResponseStatus.CONFLICT, Map.of("error",
+                        "결제 금액이 메뉴판 값과 다릅니다 (메뉴판 " + total + "원) — 메뉴판이 바뀌었을 수 있습니다"));
+            }
             com.fasterxml.jackson.databind.node.ObjectNode order = JSON.createObjectNode();
             order.put("storeId", device.get().storeId());
             String member = body.path("memberNo").asText("");
             order.put("customerId", member.isBlank() ? "kiosk" : member);
-            order.set("lines", body.get("lines"));
+            order.set("lines", priced.lines());
             if (body.hasNonNull("payment")) {
                 order.set("payment", body.get("payment"));
             }

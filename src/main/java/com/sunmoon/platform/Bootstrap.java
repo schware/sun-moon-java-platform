@@ -317,7 +317,7 @@ public final class Bootstrap {
             com.sunmoon.platform.api.PrintEndpoints printing) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
-        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient, kdsAuthority);
+        OrderProxyEndpoints orderEndpoints = new OrderProxyEndpoints(orderClient, kdsAuthority, appServerClient);
         MenuProxyEndpoints menuEndpoints = new MenuProxyEndpoints(appServerClient);
         SaleEndpoints saleEndpoints = sales == null ? null : new SaleEndpoints(sales);
         com.sunmoon.platform.api.EtcSaleEndpoints etcEndpoints =
