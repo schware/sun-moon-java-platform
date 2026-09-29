@@ -1,20 +1,36 @@
 # sun-moon-java-platform
 
-DDD-based order/kitchen/delivery system plus its Back Office, split into
-four independently deployable services. This repo is an **umbrella** tying
-them together as git submodules — there's no application source here, just
-the cross-cutting architecture decisions and links.
+매장 주문·주방·매출 시스템(sun-moon)의 **umbrella** 저장소입니다. 애플리케이션 소스는
+없고, 서비스 저장소를 submodule 로 묶고 전체에 걸친 결정(ADR)과 문서를 둡니다.
 
-New here? [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) is what the four
-services agree on, written as commands you run rather than rules you take
-on trust.
+## 읽는 순서
 
-| Service | Repo | Role | Data store |
-|---|---|---|---|
-| **Order** | [`order/`](order) → [sun-moon-java-platform-order](https://github.com/schware/sun-moon-java-platform-order) | Order creation, publishes `OrderCreated` | Postgres (JSONB) |
-| **KDS** | [`kds/`](kds) → [sun-moon-java-platform-kds](https://github.com/schware/sun-moon-java-platform-kds) | Kitchen ticket queue, publishes `OrderReady` | Redis |
-| **Delivery** | [`delivery/`](delivery) → [sun-moon-java-platform-delivery](https://github.com/schware/sun-moon-java-platform-delivery) | Courier assignment/tracking, publishes `OrderDelivered` | Postgres (JSONB) |
-| **BO** | [`bo/`](bo) → [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) |  Back Office — 운영자, 공지사항, 공통코드, 장비 (React 콘솔 포함) | Postgres |
+1. [`docs/FLOW.md`](docs/FLOW.md) — **지금 전체가 어떻게 동작하는가** (한 장 그림, 주문의 일생, 켜는 스위치)
+2. [`docs/REVIEW-2026-09-29.md`](docs/REVIEW-2026-09-29.md) — 기능 확인표 (어디서 보나, 근거, 상태)
+3. [`docs/HANDOFF-2026-09-29.md`](docs/HANDOFF-2026-09-29.md) — 최근에 바뀐 것, 서버 배포 상태, 다음에 할 것
+4. 설계: [`docs/design/store-app.md`](docs/design/store-app.md) (매장 단말) ·
+   [`docs/design/customer-app.md`](docs/design/customer-app.md) (손님 앱)
+5. Spring 서비스들의 공통 규칙: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 규칙이 아니라 돌려 보는 명령으로
+
+## 전체 구성 (2026-09-29)
+
+전부 Debian 서버(192.168.0.2)에 서비스마다 Docker 컨테이너 하나로 돕니다. 빌드·배포는
+[`Debian-Setting/docs/docker.md`](https://github.com/schware/Debian-Setting/blob/master/docs/docker.md),
+비밀의 위치는 같은 저장소의 `docs/secrets.md` (값은 어디에도 적지 않음).
+
+| 구성 | 저장소 | 여기서 | 주소 | 역할 |
+|---|---|---|---|---|
+| **OMS (Order)** | [sun-moon-java-platform-order](https://github.com/schware/sun-moon-java-platform-order) | [`order/`](order) | `:8083/order/` LAN | 주문·영업일·수령번호 — 사실이 적히는 곳 |
+| **APP-SERVER** | [sun-moon-java-platform-app-server](https://github.com/schware/sun-moon-java-platform-app-server) | [`app-server/`](app-server) | `:8086` LAN | 손님 원장·결제·회원·푸시 |
+| **channel-order** | [sun-moon-java-platform-channel-order](https://github.com/schware/sun-moon-java-platform-channel-order) | [`channel-order/`](channel-order) | `:8085/channel-order/` 공개 | 손님 창구 — QR 웹, 앱 API, KIOSK 화면 |
+| **BO** | [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) | [`bo/`](bo) | `:8080/bo/` LAN | 기준정보·장비·매출 조회·관제 (React 콘솔 포함) |
+| **Device Server** | 이 GitHub 저장소의 **`master` 브랜치** | — | `:8087` 공개 | 단말 연결(WebSocket)·매출 원본·라벨·운영 (Netty) |
+| **POS · KDS · DID 화면** | [pos](https://github.com/schware/sun-moon-terminal-pos) · [kds](https://github.com/schware/sun-moon-terminal-kds) · [did](https://github.com/schware/sun-moon-terminal-did) | — | `:8000/pos/` `/kds/` `/did/` | 매장 단말 웹 화면 (nginx 가 번들을 줌) |
+| **매장 단말 셸** | [sun-moon-store-app](https://github.com/schware/sun-moon-store-app) (private) | — | — | POS·KIOSK·KDS-MAIN 용 Electron 셸 — 매장에는 아직 없음 |
+| 서버 설정 | [Debian-Setting](https://github.com/schware/Debian-Setting) | — | — | 배포·DB·비밀 위치 |
+| KDS · Delivery | [kds](https://github.com/schware/sun-moon-java-platform-kds) · [delivery](https://github.com/schware/sun-moon-java-platform-delivery) | [`kds/`](kds) [`delivery/`](delivery) | `:8081` · `:8082` | 처음 MSA 로 나눌 때의 서비스. 컨테이너는 떠 있지만 지금의 주문 흐름(FLOW.md)에는 없음 |
+
+submodule 은 각 저장소의 최신 커밋(= 서버에 배포된 커밋)을 가리킵니다.
 
 Archived predecessors:
 [sun-moon-java-platform-netty](https://github.com/schware/sun-moon-java-platform-netty)
@@ -40,24 +56,21 @@ Already cloned without `--recurse-submodules`?
 git submodule update --init --recursive
 ```
 
+submodule 이 아닌 것 (Device Server, 단말 화면, 셸):
+
+```
+git clone -b master https://github.com/schware/sun-moon-java-platform.git sun-moon-device-server
+git clone https://github.com/schware/sun-moon-terminal-pos.git
+git clone https://github.com/schware/sun-moon-terminal-kds.git
+git clone https://github.com/schware/sun-moon-terminal-did.git
+git clone https://github.com/schware/sun-moon-store-app.git
+```
+
 ## Where things run
-
-Each service runs as its own Docker container on the Debian homelab host
-(`--network host`, one port each) — real process isolation, independent
-redeploy, per-container memory limits. See
-[`Debian-Setting/docs/docker.md`](https://github.com/schware/Debian-Setting/blob/master/docs/docker.md)
-for how to build/run/redeploy.
-
-| | URL | |
-|---|---|---|
-| BO | `http://<host>:8080/bo/` | LAN only |
-| KDS | `http://<host>:8081/kds/` | |
-| Delivery | `http://<host>:8082/delivery/` | |
-| Order | `http://<host>:8083/order/` | |
 
 Port numbers come from the server-wide scheme, not from this repo — see
 Debian-Setting's `docs/docker.md`. Order moved 8080 → 8083 to free 8080
-for BO.
+for BO. 전체 주소는 위의 "전체 구성" 표에 있습니다.
 
 Previously all three ran as WARs on one shared Jetty instance — see
 `docs/adr/0003` for why that changed. That setup's docs/scripts are
@@ -114,6 +127,9 @@ Docker approach ever needs to be un-done.
   마스터 배포(적용 버전은 장비가 말해야 올라간다). 추가분(09-18): §3.5 의 나머지
   — 시계는 서버가 재고, 프로그램 버전은 이름이라 되돌리기가 그냥 새 배포이며,
   긴급 메시지는 먼저 적고 그다음에 민다. 그리고 그것을 볼 BO 화면 넷.
+- [`docs/adr/0015`](docs/adr/0015-store-terminals-electron-where-the-hardware-is.md)
+  — 매장 단말은 하드웨어(원장·프린터)가 있는 곳만 Electron 셸, 나머지는 웹. KDS-MAIN 이
+  주방의 중심.
 
 > **지금 어떻게 동작하는지는** [`docs/FLOW.md`](docs/FLOW.md) 한 곳에 있습니다 —
 > 단말과 서버, 기기 신원(페어링·토큰), 주문의 일생, KIOSK, 라벨, 셸, 켜는 스위치.
