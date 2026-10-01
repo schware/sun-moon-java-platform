@@ -30,7 +30,22 @@
 | 서버 설정 | [Debian-Setting](https://github.com/schware/Debian-Setting) | — | — | 배포·DB·비밀 위치 |
 | KDS · Delivery | [kds](https://github.com/schware/sun-moon-java-platform-kds) · [delivery](https://github.com/schware/sun-moon-java-platform-delivery) | [`kds/`](kds) [`delivery/`](delivery) | `:8081` · `:8082` | 처음 MSA 로 나눌 때의 서비스. 컨테이너는 떠 있지만 지금의 주문 흐름(FLOW.md)에는 없음 |
 
-submodule 은 각 저장소의 최신 커밋(= 서버에 배포된 커밋)을 가리킵니다.
+submodule 은 각 저장소의 최신 커밋을 가리킵니다. 서버에 배포된 커밋은 가장 최근 HANDOFF 에 있습니다.
+
+## 개발 체제 — 2명 (Back-end · Front-end)
+
+**Sun&Moon 결정 (2026-10-01): 개발자 2명, Back-end 1명과 Front-end 1명으로 진행합니다.**
+
+저장소별 담당은 아래가 **제안**입니다(Sun&Moon 확정 전). 기준은 "그 저장소의 코드가 어느 쪽 기술인가" 입니다.
+
+| 담당 | 저장소 · 부분 |
+|---|---|
+| **Back-end** | Device Server(Netty) · OMS(Order) · APP-SERVER · BO 서버(Spring) · channel-order 서버(Spring) · DB 마이그레이션·fdw 뷰 · Debian 서버 배포(Docker) |
+| **Front-end** | POS · KDS · DID 화면 · BO 콘솔(`bo/frontend`) · 손님 화면·KIOSK 화면(`channel-order/frontend`) · 셸(SunMoon Store, Electron) |
+| **둘이 함께 정할 것** | 단말 ↔ Device Server 의 HTTP 주소와 WebSocket 프레임(FLOW.md §2·§3·§9), 셸의 프린터·원장(Electron main 이 서버·하드웨어와 맞닿는 곳) |
+
+한 저장소에 화면과 서버가 같이 있는 곳(BO, channel-order)은 폴더로 나눕니다 — `frontend/` 는 Front-end,
+나머지는 Back-end.
 
 Archived predecessors:
 [sun-moon-java-platform-netty](https://github.com/schware/sun-moon-java-platform-netty)
