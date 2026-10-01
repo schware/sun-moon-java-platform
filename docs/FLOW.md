@@ -25,7 +25,7 @@
   │                       │                            ↑                                  │
   │                       │  Device Server :8087 ──────┘ ←────────────────────────────────┘
   │                       │  (단말 연결·인증·매출 원본·라벨·운영)   ←── BO :8080 (기준정보·관제, LAN)
-  │                       │         ↑ HTTP + WebSocket (기기 토큰)                         │
+  │                       │         ↑ HTTP + WebSocket (매장·장비 ID)                      │
   │                       └─────────┼─────────────────────────────────────────────────────┘
   매장                              │
     카운터  POS ───────────── 셸 ───┤   셸 = SunMoon Store (Electron, sun-moon-store-app)
@@ -46,7 +46,7 @@ KDS-MAIN 은 주방의 **결정권자**이지 저장소가 아닙니다.
 |---|---|---|---|
 | **POS** | 셸 (또는 웹) | Device Server | 주문 수락·거절, 거래번호 채번, **로컬 원장**, 매출 올리기, 영수증·돈통 |
 | **KIOSK** | 셸 | Device Server | **캐셔 없는 POS** — 손님이 담고 결제, 자기 번호로 채번, 수락된 채로 주방으로 |
-| **KDS-MAIN** | 셸 (또는 웹, 페어링 전 임시) | Device Server | 주방의 중심 — 전체 흐름, 수령, 다시 부르기, 강제 전부 완료, **라벨** |
+| **KDS-MAIN** | 셸 (또는 웹) | Device Server | 주방의 중심 — 전체 흐름, 수령, 다시 부르기, 강제 전부 완료, **라벨** |
 | **KDS SUB** | 웹 | Device Server | 자기 줄만 시작·완료. MAIN 이 3분 넘게 끊기면 비상 수령 |
 | **DID** | 웹 | Device Server | 부른 번호를 보여줌. 여러 매장을 한 화면에 가능 |
 | **손님 웹** (QR) | 웹 | channel-order | 테이블 QR 주문, 영수증 QR 로 주문 상태 조회 |
@@ -54,47 +54,36 @@ KDS-MAIN 은 주방의 **결정권자**이지 저장소가 아닙니다.
 | APP-SERVER | Spring, LAN | OMS, BO(fdw) | 손님 주문 원장, 결제 승인, 회원번호 |
 | OMS (Order) | Spring, **LAN** | — | **사실이 적히는 곳** — 주문, 영업일, 수령번호, 줄 단위 상태, 결제 |
 | Device Server | Netty, **공개** | OMS, APP-SERVER, BO(fdw) | 단말 연결, **기기 인증**, 매출 원본·분해, 개점·마감, 배포, 공지, **라벨 작업**, KDS-MAIN 권한 |
-| BO | Spring, LAN | Device Server, OMS | 기준정보(장비·KDS 역할·결제수단 등), **페어링 코드 발급**, 관제·재처리 |
+| BO | Spring, LAN | Device Server, OMS | 기준정보(장비·**KDS 역할**·결제수단 등), KIOSK 관리자 PIN, 관제·재처리 |
 
 공개 여부 확인은 LTE 로만 합니다(NAT 루프백). OMS 는 2026-09-28 에 닫았습니다.
 
 ---
 
-## 3. 기기 신원 — 페어링과 토큰 (⏸ Sun&Moon 재설계 중)
+## 3. 기기 신원 — 매장·장비 입력
 
-> **2026-09-29: 단말 첫 화면은 매장·장비 입력으로 되돌렸고, 페어링은 Sun&Moon 이 다시
-> 설계합니다.** 아래는 지금 코드에 남아 있는 모양의 기록입니다 — 웹 단말은 더 이상 페어링하지
-> 않고, 셸만 아직 이 방식으로 기기를 알아봅니다.
+> **2026-10-01 Sun&Moon 결정: 토큰은 제외. KDS·DID 의 짝은 STORE-ID.** 페어링(코드 → 기기
+> 토큰)은 같은 날 코드에서 걷어냈습니다(Device Server V9 가 표를 지움).
 
-단말은 **자기 매장·번호·역할을 고르지 않습니다.** BO 가 정한 것이 따라옵니다.
-
-```
-BO 장비 화면 [코드] ─→ Device Server: 6자리 코드 (10분, 한 번만)
-                       코드에 묶이는 것: 매장 · 장비 번호 · 종류(POS/KDS/DID/KIOSK) · KDS 역할(MAIN/SUB)
-단말 첫 화면에 코드 ─→ POST /pos/pair ─→ 기기 토큰 (서버는 SHA-256 만 저장)
-이후 모든 요청: Authorization: Device <token>     WebSocket: ?token=
-```
-
-- 토큰이 있으면 **토큰이 신원**입니다 — 쿼리의 `deviceId`·`storeId` 는 무시합니다.
-- 보관: 셸은 main 프로세스가 **DPAPI 로 암호화**해 `config.json` 에, 웹 단말은 `localStorage`.
-- 다시 페어링하면 옛 토큰은 끝납니다. BO [해제] 는 즉시(캐시를 비움).
-- 잘못된 코드가 **1분에 20번**이면 그 1분 동안 페어링 전체를 막습니다(엔드포인트가 출발지 IP 를 몰라 서버 전체로 셈).
-- 페어링 전 방식(직접 입력)은 **"페어링 전 임시"** 로 표시된 우회로로 남아 있습니다.
+- 단말은 첫 화면의 **단말 등록**(매장 ID · 장비 ID, KDS 는 생산/메인)으로 시작합니다. 셸(POS·KIOSK·
+  KDS-MAIN)도 첫 실행 때 같은 값을 넣습니다(`config.json`).
+- 요청에는 매장·장비 ID 를 적어 보냅니다. WebSocket 연결 때 Device Server 가 **BO 장비 목록**에
+  (매장, 장비, 종류)가 있는지 확인합니다(`DEVICE_DIRECTORY=bo`).
+- 같은 매장의 KDS 와 DID 가 함께 움직입니다 — 주문 신호와 목록이 매장 단위라 따로 묶는 설정이 없습니다.
+- **KDS 의 MAIN / SUB 는 BO 장비 화면의 "KDS 역할"이 정합니다**(예: `kds-01` MAIN, `kds-02` SUB).
+  KDS 가 연결하면 Device Server 가 BO 명단에서 역할을 찾아 연결 인사(WELCOME)로 알려 주고, 화면은
+  그 역할을 따릅니다(단말 등록에서 고른 것과 달라도). 라벨 작업(PRINT)은 MAIN 연결로 가고, 한 매장에
+  MAIN 은 하나(409). BO 명단을 모를 때만 화면이 고른 역할을 씁니다.
 
 ### 주소마다 청중 (`ApiGuard`)
 
 | 청중 | 증명 | 예 |
 |---|---|---|
-| 공개 | 없음 | `/health`, `/pos/time`, `/metrics`, `/pos/pair` |
-| 단말 | 기기 토큰 | `/orders…`, `/sales`, `/menus`, `/kds/mode`, `/pos/printers`, `/pos/print-jobs…`, `/orders/kiosk` |
-| 관리 | `X-Admin-Token` (BO 만 가짐) | `/terminals…`, `/pos/notices`(등록), `/pos/programs/release`, `/reprocess…`, `/pos/pairing-codes` |
+| 공개 | 없음 | `/health`, `/pos/time`, `/metrics`, **단말이 부르는 주소 전부**(`/orders…`, `/sales`, `/menus`, `/pos/print-jobs…`, `/orders/kiosk`, `/pos/kiosk/unlock`) |
+| 관리 | `X-Admin-Token` (BO 만 가짐) | `/terminals…`, `/pos/notices`(등록), `/pos/programs/release`, `/reprocess…`, `/pos/devices/kiosk-pin` |
 
 표에 없는 주소는 **관리**로 봅니다(잊으면 닫히는 쪽으로). 시험이 Bootstrap 의 주소를 전부 읽어
-청중이 정해졌는지 확인합니다.
-
-**지금 모드는 `API_AUTH=warn`** — 토큰 없는 요청도 통과시키고 1분에 한 번 적습니다. 페어링이
-매장에 퍼지면 `enforce`. 모드와 상관없이 **막는 것**: 모르는 토큰(해제된 기기), 페어링된 기기의
-역할 위반, 다른 매장 주문, 프린터·KIOSK 주소(페어링된 기기만).
+청중이 정해졌는지 확인합니다. 지금 모드는 `API_AUTH=warn` — `enforce` 로 올려도 닫히는 것은 관리 주소뿐입니다.
 
 ---
 
@@ -116,7 +105,7 @@ KDS SUB "조리완료" ─→ 자기 줄만 완료. 모든 줄이 끝나면 OMS:
 PRODUCED ─→ DID 가 번호를 띄움
          ─→ 라벨 작업: 줄 × 수량 (라벨 프린터가 있는 매장만) ─→ KDS-MAIN 셸이 찍음
 KDS-MAIN 수령 확인 (PIN, 또는 표시된 강제 수령) ─→ OMS: COMPLETED
-         └ MAIN 이 3분 넘게 끊기면 SUB 가 비상 수령 (pickup_emergency 로 남음)
+         └ MAIN 이 3분 넘게 끊기면 생산 KDS 가 비상 수령 (pickup_emergency 로 남음)
 ```
 
 ### KIOSK ✅ (2026-09-29 끝까지 확인)
@@ -133,7 +122,7 @@ KDS-MAIN 수령 확인 (PIN, 또는 표시된 강제 수령) ─→ OMS: COMPLET
 KIOSK 는 WebSocket 을 쓰지 않습니다. 60초 손을 안 대면 처음으로, 회원번호는 입력만.
 
 **관리자 탈출**: 화면 왼쪽 위 구석을 3초 안에 5번 → 셸의 관리자 창 → **관리자 PIN**(BO 장비 화면에서
-정함, 서버에는 해시만) → 셸이 서버에 물어 확인 → 2분 동안 창 모드 · 앱 끄기 · 페어링 지우기.
+정함, 서버에는 해시만) → 셸이 서버에 물어 확인 → 2분 동안 창 모드 · 앱 끄기 · 단말 등록 지우기.
 기기마다 10분에 5번 틀리면 10분 막힘. 서버에 닿지 않으면 풀리지 않습니다(그때는 Windows 쪽으로).
 
 ### 회원 — 번호와 토큰 ✅ (A2)
@@ -158,15 +147,17 @@ KIOSK 는 WebSocket 을 쓰지 않습니다. 60초 손을 안 대면 처음으�
 | 조리 시작 (내 줄) | KDS SUB | ✅ 줄 단위 (`started_at`) |
 | 조리 완료 (내 줄) | KDS SUB | ✅ 줄 단위 |
 | 주문 전체 완료 | 자동 — 모든 줄이 끝나면 | ✅ |
-| 강제 전부 완료 | KDS-MAIN | ✅ 역할 확인, `force_produced_by` |
-| 다시 부르기 | KDS-MAIN | ✅ 역할 확인 |
-| 수령 | KDS-MAIN (비상 시 SUB) | ✅ 역할 확인, `pickup_emergency` |
+| 강제 전부 완료 | KDS-MAIN | ✅ 서버가 역할 확인, `force_produced_by` |
+| 다시 부르기 | KDS-MAIN | ✅ 서버가 역할 확인 |
+| 수령 | KDS-MAIN (비상 시 생산 KDS) | ✅ 서버가 역할 확인, `pickup_emergency` |
 | 라벨 출력·재출력 | KDS-MAIN | ✅ 재출력은 MAIN 만 |
 | 취소 | 손님 (APP) · 매장 (POS) | 부분 |
 
-역할 확인은 **페어링된 기기에만** 걸립니다. 페어링 전 단말(토큰 없음)은 역할을 모르므로 예전처럼
-통과하고, `enforce` 가 되면 ApiGuard 가 먼저 막습니다. BO 매출 조회에는 강제 완료·비상 수령·번호
-확인 없는 수령이 **같은 자리에 배지**로 보입니다.
+메인의 일(다시 부르기·강제 완료·수령·라벨 다시)은 **서버도 확인합니다** — 요청의 장비가 그 주문 매장의
+BO 명단에서 MAIN 이어야 합니다(`KdsAuthority`). 명단을 모르거나 명단에 없는 KDS 는 막지 않습니다.
+BO 에 MAIN 이 정해진 매장에서 그 MAIN 이 **3분 넘게 끊기면** 생산 KDS 에 수령 칸이 열리고, 그 수령은
+**비상 수령**(`pickup_emergency`)으로 남습니다. BO 매출 조회에는 강제 완료·비상 수령·번호 확인 없는 수령이
+**같은 자리에 배지**로 보입니다.
 
 ---
 
@@ -175,7 +166,7 @@ KIOSK 는 WebSocket 을 쓰지 않습니다. 60초 손을 안 대면 처음으�
 | 층 | 누가 | 무엇 | 받는 쪽 |
 |---|---|---|---|
 | **매장 운영** | **KDS-MAIN** | 다시 부르기, 라벨 재출력, 강제 완료, 수령 | 주방 쪽 단말 |
-| **본사** | BO | 공지·긴급, 프로그램·화면 배포, 마스터 배포, 결제수단·장비·페어링 | 모든 단말 |
+| **본사** | BO | 공지·긴급, 프로그램·화면 배포, 마스터 배포, 결제수단·장비 | 모든 단말 |
 
 KDS-MAIN 은 **매장에 하나** — 같은 매장에 두 번째 MAIN 이 붙으면 409.
 
@@ -193,7 +184,7 @@ KDS-MAIN 은 **매장에 하나** — 같은 매장에 두 번째 MAIN 이 붙�
 | 프린터 | ESC/POS over TCP 9100, CP949. **어디로 찍을지는 셸이 정함** — BO 장비(`RECEIPT_PRINTER`/`LABEL_PRINTER`) 중 그 매장 것만 |
 | 늘 켜짐 | 로그인 시 시작, 화면이 죽으면 다시(1분 3번 넘으면 멈춤), 새벽 4시 새로 띄움, 두 번 켜면 첫 창으로 |
 | 결제 | KIOSK: 가상 승인 `SMK-yyyyMMdd-XXXXXX`(서울 날짜). VAN 이 정해지면 main 만 바뀜 |
-| 관리자 탈출 | KIOSK: 구석 5번 → 관리자 창 → PIN(서버가 확인) → 창 모드·끄기·페어링 지우기 |
+| 관리자 탈출 | KIOSK: 구석 5번 → 관리자 창 → PIN(서버가 확인) → 창 모드·끄기·단말 등록 지우기 |
 | 업데이트 | 화면 번들: **서명(ed25519)** 확인 → 받아 두고 **다음 시작 때** 적용 → 30초 안에 죽으면 되돌림. **기본 꺼짐** |
 
 설치 파일은 `npm run dist` → `release/SunMoon Store Setup 0.1.0.exe`(약 115MB, **서명 없음**). 2026-09-29 에
@@ -235,7 +226,7 @@ FAILED ─→ BO 재처리의 다섯 번째 종류 PRINT ─→ 다시 줄 세�
 |---|---|
 | `order_service` (V16) | 주문·줄(시작·완료 시각), 영업일, 수령번호, 강제 완료·비상 수령, **결제** |
 | `app_server` (V4) | 손님 원장, 결제·환불, 회원번호, **회원 기기(토큰 해시·푸시 토큰)**, 주문의 영수증 토큰 |
-| `pos_server` (V8) | 매출 원본(TR·ETC)과 분해, 개점·마감, 배포, 공지, **기기 페어링·자격**, **라벨 작업**, **KIOSK 관리자 PIN(해시)** |
+| `pos_server` (V9) | 매출 원본(TR·ETC)과 분해, 개점·마감, 배포, 공지, **라벨 작업**, **KIOSK 관리자 PIN(해시)** |
 | `bo_service` | 기준정보 — 매장, 메뉴, 장비(+KDS 역할, 프린터 IP·포트), 결제수단 |
 | **POS · KIOSK 셸 SQLite** | **그 단말 거래의 원본** (ADR-0010). 서버는 올라온 것을 모읍니다 |
 
@@ -247,7 +238,7 @@ FAILED ─→ BO 재처리의 다섯 번째 종류 PRINT ─→ 다시 줄 세�
 
 | 스위치 | 어디 | 지금 | 켤 때 |
 |---|---|---|---|
-| `API_AUTH` | `~/apps/docker/sun-moon-device.env` | `warn` | 페어링이 전 매장에 퍼지고 로그가 조용해지면 `enforce` |
+| `API_AUTH` | `~/apps/docker/sun-moon-device.env` | `warn` | `NO_ADMIN_TOKEN` 로그가 조용하면 `enforce` (관리 주소만 닫힘) |
 | `ADMIN_TOKEN` / `DEVICE_SERVER_ADMIN_TOKEN` | 위 파일 / BO `.env` (같은 값) | 설정됨 | 교체는 `secrets.md` G |
 | `DEVICE_DIRECTORY` | Device Server run 줄 | `bo` | — |
 | `APP_CORS_ORIGINS` | channel-order | 기본값(`https://localhost, capacitor://localhost`) | 앱 출처가 바뀌면 |
@@ -261,7 +252,7 @@ Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼�
 
 ## 12. 남은 것
 
-- **`API_AUTH=enforce`** — 매장 단말을 페어링으로 옮긴 뒤(Sun&Moon 결정)
+- **`API_AUTH=enforce`** — 관리 주소만 닫습니다(Sun&Moon 결정)
 - **실물 프린터** 확인, 코드 서명 인증서(그 뒤 셸 자체 업데이트)
 - 진짜 VAN (그때 KIOSK 는 결제수단 확인을 승인 **전**으로)
 - 손님 앱 A3(Android 껍데기 — Android SDK 필요) · A4 앱 쪽(푸시 권한·토큰 등록 — Firebase 프로젝트 필요).
@@ -276,7 +267,7 @@ Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼�
 2. **사실은 OMS 가 적는다.** 단말은 요청하고, 이벤트는 신호일 뿐. 예외는 거래 원본 — POS·KIOSK 원장.
 3. **원본은 그대로 담고, 나중에 푼다.** 실패하면 멈추고 사람을 기다린다.
 4. **모르는 것과 없는 것은 다르다.** 목록을 못 읽으면 막지 않고 크게 경고한다.
-5. **매장 화면에 막다른 길을 두지 않는다.** 표시된 우회로(강제 수령·강제 완료·비상 수령·페어링 전 임시)
+5. **매장 화면에 막다른 길을 두지 않는다.** 표시된 우회로(강제 수령·강제 완료·비상 수령)
    — 그리고 우회로는 기록에 남는다.
 6. **명령의 주인은 하나.** 주방은 KDS-MAIN, 본사는 BO.
-7. **화면을 믿지 않는다.** 값(가격)은 서버가 메뉴판에서, 신원은 토큰에서, 프린터 주소는 셸이 BO 장비에서.
+7. **화면을 믿지 않는다.** 값(가격)은 서버가 메뉴판에서, 프린터 주소는 셸이 BO 장비에서.
