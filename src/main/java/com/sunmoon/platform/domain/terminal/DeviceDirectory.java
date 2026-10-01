@@ -24,4 +24,17 @@ public interface DeviceDirectory {
      * @param type     POS / KDS / DID
      */
     boolean isRegistered(String storeId, String deviceId, String type);
+
+    /**
+     * BO 장비에 적힌 그 KDS 의 역할 — {@code "MAIN"} 또는 {@code "SUB"}.
+     * 명단을 모르거나(읽기 전, BO 를 안 보는 기동) 역할이 비어 있으면 빈 값입니다. 모르는 것은 막지 않습니다.
+     */
+    default java.util.Optional<String> kdsRole(String storeId, String deviceId) {
+        return java.util.Optional.empty();
+    }
+
+    /** 그 매장에 BO 가 MAIN 으로 정한 KDS 가 있나. 모르면 false. */
+    default boolean hasKdsMain(String storeId) {
+        return false;
+    }
 }

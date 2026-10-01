@@ -1,8 +1,5 @@
 package com.sunmoon.platform.transport.ws;
 
-import com.sunmoon.platform.api.auth.ApiGuard;
-import com.sunmoon.platform.domain.pairing.DeviceIdentity;
-import com.sunmoon.platform.domain.pairing.TerminalTokens;
 import com.sunmoon.platform.domain.terminal.DeviceDirectory;
 import com.sunmoon.platform.domain.terminal.TerminalRegistry;
 import com.sunmoon.platform.domain.terminal.TerminalType;
@@ -18,15 +15,11 @@ import io.netty.handler.codec.http.HttpVersion;
 import io.netty.handler.codec.http.QueryStringDecoder;
 import io.netty.util.AttributeKey;
 import io.netty.util.ReferenceCountUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Identifies a terminal <em>before</em> the WebSocket upgrade completes.
@@ -58,36 +51,22 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
     public static final AttributeKey<String> STORE_ID = AttributeKey.valueOf("storeId");
     public static final AttributeKey<List<String>> STORE_IDS = AttributeKey.valueOf("storeIds");
     public static final AttributeKey<TerminalType> TERMINAL_TYPE = AttributeKey.valueOf("terminalType");
-    /** KDS 의 역할 (MAIN | SUB). 토큰으로 붙은 KDS 에만 있습니다 — 옛 방식은 역할을 모릅니다. */
+    /**
+     * KDS 의 역할 (MAIN | SUB). <b>BO 장비의 "KDS 역할"</b>이 정합니다 — 화면이 보낸
+     * {@code role=MAIN} 은 BO 명단을 모를 때만 씁니다. 라벨 작업(PRINT)이 MAIN 연결로 갑니다.
+     */
     public static final AttributeKey<String> KDS_ROLE = AttributeKey.valueOf("kdsRole");
 
-    private static final Logger log = LoggerFactory.getLogger(TerminalHandshakeHandler.class);
     private static final String WEBSOCKET_PATH = "/ws";
-    /** 토큰 없이 붙은 단말을 1분에 한 번만 적습니다 — 전 매장이 그렇게 붙어 있는 동안은 시끄럽습니다. */
-    private static final AtomicLong lastUntokenedLog = new AtomicLong();
-
     private final DeviceDirectory directory;
-    private final TerminalTokens tokens;
-    private final ApiGuard.Mode mode;
     private final TerminalRegistry registry;
 
-    /** 옛 방식 그대로 — 토큰을 보지 않습니다. 시험과 데이터베이스 없는 기동용. */
     public TerminalHandshakeHandler(DeviceDirectory directory) {
-        this(directory, TerminalTokens.NONE, ApiGuard.Mode.OFF, null);
+        this(directory, null);
     }
 
-    /**
-     * 토큰이 있으면 <b>토큰이 신원</b>입니다 (store-app.md §3.5) — 쿼리의
-     * 매장·번호·종류는 무시하고 페어링 때 적힌 것을 씁니다.
-     *
-     * <p>토큰이 없으면: {@code enforce} 는 거절, 그 밖에는 예전처럼 쿼리를 믿고
-     * 적어 둡니다. 페어링이 전 매장에 퍼지기 전에 막으면 단말이 전부 멈춥니다.
-     */
-    public TerminalHandshakeHandler(DeviceDirectory directory, TerminalTokens tokens,
-                                    ApiGuard.Mode mode, TerminalRegistry registry) {
+    public TerminalHandshakeHandler(DeviceDirectory directory, TerminalRegistry registry) {
         this.directory = directory;
-        this.tokens = tokens;
-        this.mode = mode;
         this.registry = registry;
     }
 
@@ -107,43 +86,7 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
         String deviceId = first(query, "deviceId");
         String storeId = first(query, "storeId");
         String rawType = first(query, "type");
-        String kdsRole = null;
-
-        String token = first(query, "token");
-        if (token != null && !token.isBlank()) {
-            Optional<DeviceIdentity> paired = tokens.resolve(token);
-            if (paired.isEmpty()) {
-                // 토큰을 냈는데 모르는 토큰 — 끝난 자격이거나 다른 서버의 것.
-                // warn 에서도 쿼리로 되돌아가지 않습니다: 그러면 revoke 가 뜻이 없습니다.
-                reject(ctx, request, HttpResponseStatus.UNAUTHORIZED,
-                        "이 기기의 페어링이 끝났습니다. BO 에서 코드를 새로 받아 다시 페어링하십시오");
-                return;
-            }
-            DeviceIdentity device = paired.get();
-            if (deviceId != null && !deviceId.equals(device.deviceId())) {
-                log.warn("토큰의 기기({})와 쿼리의 기기({})가 다릅니다 — 토큰을 씁니다", device.deviceId(), deviceId);
-            }
-            deviceId = device.deviceId();
-            rawType = device.type();
-            kdsRole = device.kdsRole();
-            // DID 는 여러 매장을 볼 수 있습니다 — 쿼리의 목록을 쓰되 자기 매장이 들어 있어야 합니다.
-            if ("DID".equals(device.type()) && storeId != null
-                    && splitStoreIds(storeId).contains(device.storeId())) {
-                // 그대로
-            } else {
-                storeId = device.storeId();
-            }
-        } else if (mode == ApiGuard.Mode.ENFORCE) {
-            reject(ctx, request, HttpResponseStatus.UNAUTHORIZED,
-                    "페어링되지 않은 기기입니다. BO 에서 페어링 코드를 받아 입력하십시오");
-            return;
-        } else if (mode == ApiGuard.Mode.WARN) {
-            long now = System.currentTimeMillis();
-            long last = lastUntokenedLog.get();
-            if (now - last > 60_000 && lastUntokenedLog.compareAndSet(last, now)) {
-                log.warn("[warn — 통과시킴] 토큰 없이 붙은 단말: {} {} {}", storeId, rawType, deviceId);
-            }
-        }
+        String askedRole = "MAIN".equalsIgnoreCase(first(query, "role")) ? "MAIN" : "SUB";
 
         if (deviceId == null || deviceId.isBlank()) {
             reject(ctx, request, "deviceId is missing or not a valid device id");
@@ -181,6 +124,9 @@ public final class TerminalHandshakeHandler extends ChannelInboundHandlerAdapter
             reject(ctx, request, "storeId must be exactly one value for " + type);
             return;
         }
+        String kdsRole = type == TerminalType.KDS
+                ? directory.kdsRole(storeIds.get(0), deviceId).orElse(askedRole)
+                : null;
         // KDS-MAIN 은 매장에 하나 (§3.5). 같은 기기가 다시 붙는 것은 괜찮습니다 —
         // 등록이 옛 연결을 대신합니다.
         if ("MAIN".equals(kdsRole) && otherMainConnected(storeIds.get(0), deviceId)) {

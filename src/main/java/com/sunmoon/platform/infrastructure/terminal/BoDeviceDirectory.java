@@ -11,6 +11,9 @@ import java.sql.ResultSet;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.Optional;
+import java.util.Map;
+import java.util.HashMap;
 import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
@@ -73,10 +76,13 @@ public final class BoDeviceDirectory implements DeviceDirectory {
         this.fallback = fallback;
     }
 
-    /** 읽어 둔 명단과, 그걸 읽은 때. */
-    private record Snapshot(Set<String> keys, Instant readAt, boolean everRead) {
+    /**
+     * 읽어 둔 명단과, 그걸 읽은 때. {@code kdsRoles} 는 KDS 줄의 (매장|장비) → MAIN/SUB
+     * — BO 장비 화면의 "KDS 역할" 입니다. 역할이 빈 줄은 넣지 않습니다(모름).
+     */
+    private record Snapshot(Set<String> keys, Map<String, String> kdsRoles, Instant readAt, boolean everRead) {
         static Snapshot never() {
-            return new Snapshot(Set.of(), Instant.EPOCH, false);
+            return new Snapshot(Set.of(), Map.of(), Instant.EPOCH, false);
         }
 
         boolean stale(Instant now) {
@@ -120,7 +126,7 @@ public final class BoDeviceDirectory implements DeviceDirectory {
             return current;
         }
         try {
-            Snapshot fresh = new Snapshot(read(), Instant.now(), true);
+            Snapshot fresh = read();
             snapshot.set(fresh);
             log.info("BO 장비 명단 {}건을 읽었습니다", fresh.keys().size());
             return fresh;
@@ -132,7 +138,7 @@ public final class BoDeviceDirectory implements DeviceDirectory {
                 log.warn("BO 장비 명단을 갱신하지 못했습니다 — {}에 읽은 것으로 계속합니다",
                         current.readAt(), unreadable);
                 // 다시 시도할 수 있도록 읽은 시각만 밀어 둡니다.
-                snapshot.set(new Snapshot(current.keys(), Instant.now(), true));
+                snapshot.set(new Snapshot(current.keys(), current.kdsRoles(), Instant.now(), true));
                 return current;
             }
             log.error("BO 장비 명단을 한 번도 읽지 못했습니다 — 모양만 보고 받습니다", unreadable);
@@ -140,19 +146,47 @@ public final class BoDeviceDirectory implements DeviceDirectory {
         }
     }
 
-    private Set<String> read() {
+    @Override
+    public Optional<String> kdsRole(String storeId, String deviceId) {
+        Snapshot current = refreshIfStale();
+        if (!current.everRead()) {
+            return Optional.empty();
+        }
+        String role = current.kdsRoles().get(roleKey(storeId, deviceId));
+        if (role == null) {
+            role = current.kdsRoles().get(roleKey(null, deviceId));
+        }
+        return Optional.ofNullable(role);
+    }
+
+    @Override
+    public boolean hasKdsMain(String storeId) {
+        String prefix = roleKey(storeId, "");
+        return refreshIfStale().kdsRoles().entrySet().stream()
+                .anyMatch(e -> e.getKey().startsWith(prefix) && "MAIN".equals(e.getValue()));
+    }
+
+    private Snapshot read() {
         // active 만 봅니다. 장비를 뺀 것과 없던 장비는 BO에서 다른
         // 일이지만, 여기서는 같은 답입니다 — 지금 붙으면 안 됩니다.
-        String sql = "SELECT store_id, device_id, terminal_type FROM v_bo_devices WHERE active";
+        String sql = "SELECT store_id, device_id, terminal_type, kds_role FROM v_bo_devices WHERE active";
         try (Connection c = dataSource.getConnection();
              PreparedStatement ps = c.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
             Set<String> keys = new HashSet<>();
+            Map<String, String> roles = new HashMap<>();
             while (rs.next()) {
-                keys.add(key(rs.getString("store_id"), rs.getString("device_id"),
-                        rs.getString("terminal_type")));
+                String type = rs.getString("terminal_type");
+                keys.add(key(rs.getString("store_id"), rs.getString("device_id"), type));
+                // 역할이 빈 KDS 는 "모름" — BO 에서 역할을 정하기 전의 줄입니다. SUB 로 읽으면
+                // 메인으로 쓰던 화면이 생산 화면으로 바뀌어 수령할 곳이 없어집니다.
+                String role = rs.getString("kds_role");
+                if ("KDS".equalsIgnoreCase(type) && role != null && !role.isBlank()) {
+                    roles.put(roleKey(rs.getString("store_id"), rs.getString("device_id")),
+                            "MAIN".equalsIgnoreCase(role) ? "MAIN" : "SUB");
+                }
             }
-            return Set.copyOf(keys);
+            return new Snapshot(Set.copyOf(keys), Map.copyOf(roles), Instant.now(), true);
         } catch (Exception e) {
             throw new IllegalStateException("BO 장비 명단을 읽지 못했습니다", e);
         }
@@ -163,6 +197,11 @@ public final class BoDeviceDirectory implements DeviceDirectory {
      * 보내는 {@code pos} 가 같은 장비를 뜻하는데, 여기서 갈리면
      * "등록했는데 안 붙는다"가 됩니다.
      */
+    private static String roleKey(String storeId, String deviceId) {
+        String store = storeId == null || storeId.isBlank() ? "*" : storeId.toLowerCase(Locale.ROOT);
+        return store + "|" + (deviceId == null ? "" : deviceId.toLowerCase(Locale.ROOT));
+    }
+
     private static String key(String storeId, String deviceId, String type) {
         String store = storeId == null || storeId.isBlank()
                 ? "*" : storeId.toLowerCase(Locale.ROOT);

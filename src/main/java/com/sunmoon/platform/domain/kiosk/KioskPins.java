@@ -1,4 +1,4 @@
-package com.sunmoon.platform.domain.pairing;
+package com.sunmoon.platform.domain.kiosk;
 
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;

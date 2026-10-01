@@ -2,8 +2,6 @@ package com.sunmoon.platform.api;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.sunmoon.platform.api.auth.ApiGuard;
-import com.sunmoon.platform.domain.pairing.DeviceIdentity;
 import com.sunmoon.platform.domain.print.PrintJob;
 import com.sunmoon.platform.domain.print.PrintJobStore;
 import com.sunmoon.platform.infrastructure.print.BoPrinters;
@@ -23,14 +21,14 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 프린터와 라벨 작업 (store-app.md §6.3, §7). 전부 <b>페어링된 기기만</b> 부릅니다 —
- * 모드와 상관없이. 찍는 것은 셸이고, 셸은 페어링해야 뜹니다. 매장은 늘 신원에서 옵니다.
+ * 프린터와 라벨 작업 (store-app.md §6.3, §7). 매장은 다른 단말 주소와 같이 요청의
+ * {@code storeId} 로 받습니다 — 작업은 그 매장 것만 보이고 만질 수 있습니다.
  *
  * <table>
- *   <tr><td>{@code GET /pos/printers}</td><td>그 매장의 프린터(주소 포함)</td></tr>
- *   <tr><td>{@code GET /pos/print-jobs?id= | ?status= | ?orderId=}</td><td>작업</td></tr>
- *   <tr><td>{@code POST /pos/print-jobs/ack?id=} {@code {ok, error}}</td><td>찍혔다/못 찍었다</td></tr>
- *   <tr><td>{@code POST /pos/print-jobs/reprint?id=}</td><td>다시 찍기 (MAIN)</td></tr>
+ *   <tr><td>{@code GET /pos/printers?storeId=}</td><td>그 매장의 프린터(주소 포함)</td></tr>
+ *   <tr><td>{@code GET /pos/print-jobs?storeId=&id= | &status= | &orderId=}</td><td>작업</td></tr>
+ *   <tr><td>{@code POST /pos/print-jobs/ack?storeId=&id=} {@code {ok, error}}</td><td>찍혔다/못 찍었다</td></tr>
+ *   <tr><td>{@code POST /pos/print-jobs/reprint?storeId=&id=&deviceId=}</td><td>다시 찍기 (KDS-MAIN)</td></tr>
  * </table>
  */
 public final class PrintEndpoints {
@@ -48,32 +46,26 @@ public final class PrintEndpoints {
         this.kds = kds;
     }
 
-    private static Optional<DeviceIdentity> me() {
-        return ApiGuard.currentDevice();
-    }
-
-    private static FullHttpResponse unpaired() {
-        return JsonResponses.of(HttpResponseStatus.UNAUTHORIZED,
-                Map.of("error", "페어링된 기기만 프린터를 씁니다"));
+    private static FullHttpResponse noStore() {
+        return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "storeId 가 필요합니다"));
     }
 
     public RestEndpoint printers() {
         return request -> {
-            Optional<DeviceIdentity> device = me();
-            if (device.isEmpty()) {
-                return unpaired();
+            String store = param(request.uri(), "storeId");
+            if (store == null) {
+                return noStore();
             }
-            return JsonResponses.of(HttpResponseStatus.OK, printers.of(device.get().storeId()));
+            return JsonResponses.of(HttpResponseStatus.OK, printers.of(store));
         };
     }
 
     public RestEndpoint list() {
         return request -> {
-            Optional<DeviceIdentity> device = me();
-            if (device.isEmpty()) {
-                return unpaired();
+            String store = param(request.uri(), "storeId");
+            if (store == null) {
+                return noStore();
             }
-            String store = device.get().storeId();
             Long id = number(request.uri(), "id");
             if (id != null) {
                 return jobs.find(id).filter(j -> j.storeId().equals(store))
@@ -97,13 +89,13 @@ public final class PrintEndpoints {
 
     public RestEndpoint ack() {
         return request -> {
-            Optional<DeviceIdentity> device = me();
-            if (device.isEmpty()) {
-                return unpaired();
+            String store = param(request.uri(), "storeId");
+            if (store == null) {
+                return noStore();
             }
             Long id = number(request.uri(), "id");
             Optional<PrintJob> job = id == null ? Optional.empty() : jobs.find(id);
-            if (job.isEmpty() || !job.get().storeId().equals(device.get().storeId())) {
+            if (job.isEmpty() || !job.get().storeId().equals(store)) {
                 return JsonResponses.of(HttpResponseStatus.NOT_FOUND, Map.of("error", "그런 작업이 없습니다"));
             }
             JsonNode body = body(request);
@@ -115,20 +107,22 @@ public final class PrintEndpoints {
 
     public RestEndpoint reprint() {
         return request -> {
-            Optional<DeviceIdentity> device = me();
-            if (device.isEmpty()) {
-                return unpaired();
-            }
-            KdsAuthority.Decision decision = kds.decide(KdsAuthority.Action.REPRINT, device);
-            if (!decision.allowed()) {
-                return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", decision.reason()));
+            String store = param(request.uri(), "storeId");
+            String deviceId = param(request.uri(), "deviceId");
+            if (store == null || deviceId == null) {
+                return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
+                        Map.of("error", "storeId 와 deviceId 가 필요합니다"));
             }
             Long id = number(request.uri(), "id");
             Optional<PrintJob> original = id == null ? Optional.empty() : jobs.find(id);
-            if (original.isEmpty() || !original.get().storeId().equals(device.get().storeId())) {
+            if (original.isEmpty() || !original.get().storeId().equals(store)) {
                 return JsonResponses.of(HttpResponseStatus.NOT_FOUND, Map.of("error", "그런 작업이 없습니다"));
             }
-            PrintJob again = jobs.reprint(id, device.get().deviceId()).orElseThrow();
+            KdsAuthority.Decision decision = kds.decide(KdsAuthority.Action.REPRINT, store, deviceId);
+            if (!decision.allowed()) {
+                return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", decision.reason()));
+            }
+            PrintJob again = jobs.reprint(id, deviceId).orElseThrow();
             push.push(again.storeId(), List.of(again.id()));
             return JsonResponses.of(HttpResponseStatus.OK, again);
         };

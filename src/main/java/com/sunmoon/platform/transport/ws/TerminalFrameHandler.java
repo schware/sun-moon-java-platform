@@ -74,10 +74,13 @@ public final class TerminalFrameHandler extends SimpleChannelInboundHandler<Text
                         deviceId, type, storeId, registry.size());
             }
 
+            // KDS 면 역할도 — BO 가 정한 MAIN/SUB 를 화면이 따릅니다.
+            String kdsRole = ctx.channel().attr(TerminalHandshakeHandler.KDS_ROLE).get();
             ctx.writeAndFlush(new TextWebSocketFrame(
                     "{\"type\":\"WELCOME\",\"deviceId\":\"" + deviceId
                             + "\",\"storeId\":\"" + storeId
-                            + "\",\"terminal\":\"" + type + "\"}"));
+                            + "\",\"terminal\":\"" + type + "\""
+                            + (kdsRole == null ? "" : ",\"kdsRole\":\"" + kdsRole + "\"") + "}"));
             return;
         }
         super.userEventTriggered(ctx, event);

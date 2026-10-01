@@ -1,6 +1,6 @@
-package com.sunmoon.platform.infrastructure.pairing;
+package com.sunmoon.platform.infrastructure.kiosk;
 
-import com.sunmoon.platform.domain.pairing.KioskPins;
+import com.sunmoon.platform.domain.kiosk.KioskPins;
 
 import javax.sql.DataSource;
 import java.sql.Connection;

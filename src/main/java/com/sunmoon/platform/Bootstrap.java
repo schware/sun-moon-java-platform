@@ -1,8 +1,8 @@
 package com.sunmoon.platform;
 
 import com.sunmoon.platform.api.auth.ApiGuard;
-import com.sunmoon.platform.api.PairingEndpoints;
-import com.sunmoon.platform.domain.pairing.PairingService;
+import com.sunmoon.platform.api.KioskPinEndpoints;
+import com.sunmoon.platform.api.KdsAuthority;
 import com.sunmoon.platform.api.CreateOrderEndpoint;
 import com.sunmoon.platform.api.MenuProxyEndpoints;
 import com.sunmoon.platform.api.MasterEndpoints;
@@ -10,7 +10,6 @@ import com.sunmoon.platform.api.PosOperationEndpoints;
 import com.sunmoon.platform.api.PosSystemEndpoints;
 import com.sunmoon.platform.api.ReprocessEndpoints;
 import com.sunmoon.platform.api.SaleEndpoints;
-import com.sunmoon.platform.api.KdsAuthority;
 import com.sunmoon.platform.api.OrderProxyEndpoints;
 import com.sunmoon.platform.api.TerminalEndpoints;
 import com.sunmoon.platform.domain.terminal.AcceptKnownFormatDirectory;
@@ -203,8 +202,10 @@ public final class Bootstrap {
             }
         }
 
-        // 주방의 명령은 KDS-MAIN 이 (§4.2). MAIN 이 언제까지 붙어 있었는지를 5초마다 적습니다.
-        KdsAuthority kdsAuthority = new KdsAuthority(terminals, config.terminalGrace(), java.time.Clock.systemUTC());
+        // 주방의 명령은 KDS-MAIN 이 (§4.2) — 누가 MAIN 인지는 BO 장비의 KDS 역할.
+        // MAIN 이 언제까지 붙어 있었는지를 5초마다 적습니다 (비상 수령).
+        KdsAuthority kdsAuthority = new KdsAuthority(terminals, directory, config.terminalGrace(),
+                java.time.Clock.systemUTC());
         Executors.newSingleThreadScheduledExecutor(
                 Thread.ofPlatform().name("kds-main-watch").daemon(true).factory())
                 .scheduleAtFixedRate(() -> {
@@ -216,28 +217,24 @@ public final class Bootstrap {
                 }, 5, 5, java.util.concurrent.TimeUnit.SECONDS);
 
         // HTTP 주소마다 누가 불러도 되는지 (store-app.md §2.2). 기본 warn — 막지 않고 적습니다.
-        // 기기 토큰은 페어링이 발급합니다 (§3). 데이터베이스가 없으면 기억만 — 재기동하면 다시 페어링.
-        PairingService pairing = new PairingService(salesDataSource == null
-                ? new com.sunmoon.platform.infrastructure.pairing.InMemoryPairingStore()
-                : new com.sunmoon.platform.infrastructure.pairing.JdbcPairingStore(salesDataSource),
-                java.time.Clock.systemUTC());
+        // 관리 주소만 토큰(BO)을 봅니다. 단말 주소는 열려 있습니다 (2026-10-01, 단말 토큰 제외).
         ApiGuard apiGuard = new ApiGuard(ApiGuard.modeFrom(System.getenv("API_AUTH")),
-                System.getenv("ADMIN_TOKEN"), pairing);
+                System.getenv("ADMIN_TOKEN"));
 
         List<ListenerSpec> listeners = List.of(
                 new ListenerSpec("Device Server", config.apiPort(), new DeviceServerInitializer(
                         apiGuard.protect(apiRoutes(eventPublisher, terminals, orderClient,
                                 appServerClient, sales, etcLogs, posBusiness, posLive, posMasters,
-                                posPrograms, posNotices, reprocess, new PairingEndpoints(pairing,
-                                        new com.sunmoon.platform.domain.pairing.KioskPins(salesDataSource == null
-                                                ? com.sunmoon.platform.infrastructure.pairing.JdbcKioskPinStore.inMemory()
-                                                : new com.sunmoon.platform.infrastructure.pairing.JdbcKioskPinStore(salesDataSource),
+                                posPrograms, posNotices, reprocess, new KioskPinEndpoints(
+                                        new com.sunmoon.platform.domain.kiosk.KioskPins(salesDataSource == null
+                                                ? com.sunmoon.platform.infrastructure.kiosk.JdbcKioskPinStore.inMemory()
+                                                : new com.sunmoon.platform.infrastructure.kiosk.JdbcKioskPinStore(salesDataSource),
                                                 java.time.Clock.systemUTC())),
                                 kdsAuthority, printJobs == null ? null
                                         : new com.sunmoon.platform.api.PrintEndpoints(
                                                 printJobs, boPrinters, labelPush, kdsAuthority),
                                 salesDataSource)),
-                        blockingWorkExecutor, directory, terminals, apiGuard)),
+                        blockingWorkExecutor, directory, terminals)),
                 new ListenerSpec("Socket", config.socketPort(), new SocketServerInitializer()));
 
         runStartupBatchJob(orders);
@@ -318,7 +315,7 @@ public final class Bootstrap {
             com.sunmoon.platform.domain.intake.RawLogStore etcLogs,
             PosBusinessService posBusiness, PosLiveService posLive, MasterDispatchService posMasters,
             ProgramDeployService posPrograms, NoticeService posNotices,
-            ReprocessService reprocess, PairingEndpoints pairing, KdsAuthority kdsAuthority,
+            ReprocessService reprocess, KioskPinEndpoints kioskPins, KdsAuthority kdsAuthority,
             com.sunmoon.platform.api.PrintEndpoints printing, javax.sql.DataSource paymentDataSource) {
 
         TerminalEndpoints terminalEndpoints = new TerminalEndpoints(terminals);
@@ -355,7 +352,7 @@ public final class Bootstrap {
                 // 재호출 — DID에 번호를 다시 띄웁니다. 상태 전이가
                 // 아닙니다: 한 번 부르든 다섯 번 부르든 PRODUCED 입니다.
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/recall"), orderEndpoints.recall()),
-                // KDS-MAIN 의 권한 (store-app.md §4). 역할 확인은 KdsAuthority.
+                // 주방 — 줄 단위 시작, 강제 전부 완료 (store-app.md §4.1).
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/start"), orderEndpoints.start()),
                 // KIOSK — 캐셔 없는 POS (store-app.md §9).
                 Map.entry(new RouteKey(HttpMethod.POST, "/orders/kiosk"), orderEndpoints.kiosk()),
@@ -428,14 +425,9 @@ public final class Bootstrap {
                 Map.entry(new RouteKey(HttpMethod.POST, "/pos/print-jobs/reprint"),
                         printing == null ? noPosStore() : printing.reprint()),
 
-                // 기기 페어링 (store-app.md §3.4). 청중은 ApiGuard 표에.
-                Map.entry(new RouteKey(HttpMethod.POST, "/pos/pairing-codes"), pairing.issueCode()),
-                Map.entry(new RouteKey(HttpMethod.POST, "/pos/pair"), pairing.pair()),
-                Map.entry(new RouteKey(HttpMethod.POST, "/pos/devices/revoke"), pairing.revoke()),
-                Map.entry(new RouteKey(HttpMethod.GET, "/pos/devices"), pairing.list()),
                 // KIOSK 관리자 PIN (§5.3) — BO 가 정하고, 셸이 물어 확인.
-                Map.entry(new RouteKey(HttpMethod.POST, "/pos/devices/kiosk-pin"), pairing.setKioskPin()),
-                Map.entry(new RouteKey(HttpMethod.POST, "/pos/kiosk/unlock"), pairing.unlockKiosk()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/devices/kiosk-pin"), kioskPins.setKioskPin()),
+                Map.entry(new RouteKey(HttpMethod.POST, "/pos/kiosk/unlock"), kioskPins.unlockKiosk()),
 
                 Map.entry(new RouteKey(HttpMethod.GET, "/pos/time"),
                         posEndpoints == null ? noPosStore() : posEndpoints.serverTime()),

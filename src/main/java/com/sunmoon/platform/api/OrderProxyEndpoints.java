@@ -1,7 +1,5 @@
 package com.sunmoon.platform.api;
 
-import com.sunmoon.platform.api.auth.ApiGuard;
-import com.sunmoon.platform.domain.pairing.DeviceIdentity;
 import com.sunmoon.platform.infrastructure.order.OrderClient;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
@@ -44,11 +42,7 @@ public final class OrderProxyEndpoints {
     private final com.sunmoon.platform.infrastructure.appserver.AppServerClient menuBoard;
 
     public OrderProxyEndpoints(OrderClient orders) {
-        this(orders, KdsAuthority.permissive());
-    }
-
-    public OrderProxyEndpoints(OrderClient orders, KdsAuthority kds) {
-        this(orders, kds, null);
+        this(orders, KdsAuthority.permissive(), null);
     }
 
     /** KIOSK 결제수단이 BO 에서 켜져 있나 (§9). 없으면 확인하지 않음. */
@@ -66,56 +60,31 @@ public final class OrderProxyEndpoints {
         return this;
     }
 
-    /**
-     * 누가 눌렀나. 페어링된 기기면 <b>토큰의 기기</b>이고 쿼리의 {@code deviceId} 는
-     * 무시합니다(store-app.md §3.5) — 쿼리는 아무나 아무 값이나 적을 수 있습니다.
-     */
+    /** 누가 눌렀나 — 단말이 적어 보낸 {@code deviceId}. */
     private static String caller(String uri) {
-        return ApiGuard.currentDevice().map(DeviceIdentity::deviceId).orElse(param(uri, "deviceId"));
+        return param(uri, "deviceId");
     }
 
-    /**
-     * 페어링된 기기가 <b>다른 매장의 주문</b>을 만지려 하면 403 을 돌려줍니다.
-     *
-     * <p>주문 id 는 쿼리에 있어서 아무 값이나 적을 수 있습니다. 매장을 아는 요청(토큰)은
-     * 그 주문이 자기 매장 것인지 한 번 더 읽고 확인합니다. 신원이 없거나 DID(여러 매장)면
-     * 확인하지 않고, 주문을 못 읽으면(404 등) 원래 호출이 그 답을 하게 둡니다.
-     */
-    private FullHttpResponse otherStore(long orderId) throws Exception {
-        java.util.Optional<DeviceIdentity> device = ApiGuard.currentDevice();
-        if (device.isEmpty() || "DID".equals(device.get().type())) {
+    /** 주문의 매장 — 주방 역할을 그 매장의 BO 명단에서 찾으려고. 못 읽으면 null(막지 않음). */
+    private String storeOf(long orderId) {
+        try {
+            HttpResponse<String> found = orders.order(orderId);
+            return found.statusCode() == 200 ? JSON.readTree(found.body()).path("storeId").asText(null) : null;
+        } catch (Exception e) {
             return null;
         }
-        HttpResponse<String> found = orders.order(orderId);
-        if (found.statusCode() != 200) {
-            return null;
-        }
-        String store = JSON.readTree(found.body()).path("storeId").asText(null);
-        return device.get().storeId().equals(store) ? null : forbidden("다른 매장의 주문입니다");
     }
 
     private static FullHttpResponse forbidden(String reason) {
         return JsonResponses.of(HttpResponseStatus.FORBIDDEN, Map.of("error", reason));
     }
 
-    /**
-     * {@code GET /orders?status=PLACED} — the list a POS terminal works from.
-     *
-     * <p><b>페어링된 POS·KDS 에는 자기 매장 주문만</b> 줍니다 (2026-09-28). 그전에는
-     * 전 매장 주문이 단말로 가고 화면이 자기 매장만 걸러 봤습니다 — 이 서버가
-     * 공개라, 거르는 쪽이 화면이면 거르지 않는 누군가도 전부를 받습니다.
-     * DID 는 여러 매장을 볼 수 있어 거르지 않습니다. 페어링 전 단말은 예전 그대로.
-     */
+    /** {@code GET /orders?status=PLACED} — the list a POS terminal works from. */
     public RestEndpoint list() {
         return request -> {
             String status = param(request.uri(), "status");
             try {
-                HttpResponse<String> upstream = orders.listOrders(status);
-                java.util.Optional<DeviceIdentity> device = ApiGuard.currentDevice();
-                if (device.isEmpty() || "DID".equals(device.get().type()) || upstream.statusCode() != 200) {
-                    return passThrough(upstream);
-                }
-                return ownStoreOnly(upstream.body(), device.get().storeId());
+                return passThrough(orders.listOrders(status));
             } catch (Exception e) {
                 return unreachable(e);
             }
@@ -124,24 +93,6 @@ public final class OrderProxyEndpoints {
 
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
             new com.fasterxml.jackson.databind.ObjectMapper();
-
-    static FullHttpResponse ownStoreOnly(String body, String storeId) throws java.io.IOException {
-        com.fasterxml.jackson.databind.JsonNode all = JSON.readTree(body);
-        com.fasterxml.jackson.databind.node.ArrayNode mine = JSON.createArrayNode();
-        if (all != null && all.isArray()) {
-            for (com.fasterxml.jackson.databind.JsonNode order : all) {
-                if (storeId.equals(order.path("storeId").asText(null))) {
-                    mine.add(order);
-                }
-            }
-        }
-        byte[] bytes = JSON.writeValueAsBytes(mine);
-        FullHttpResponse response = new DefaultFullHttpResponse(
-                HttpVersion.HTTP_1_1, HttpResponseStatus.OK, Unpooled.wrappedBuffer(bytes));
-        response.headers().set(HttpHeaderNames.CONTENT_TYPE, "application/json; charset=UTF-8");
-        response.headers().setInt(HttpHeaderNames.CONTENT_LENGTH, bytes.length);
-        return response;
-    }
 
     /**
      * {@code POST /orders/status?id=1&status=ACCEPTED&deviceId=pos-01}
@@ -175,9 +126,6 @@ public final class OrderProxyEndpoints {
             try {
                 // A 409 from Order means the move was not allowed — that is
                 // an answer, not a failure, and it reaches the terminal intact.
-                if (otherStore(orderId) instanceof FullHttpResponse refused) {
-                    return refused;
-                }
                 return passThrough(orders.changeStatus(
                         orderId, status, deviceId, param(request.uri(), "tranNo")));
             } catch (Exception e) {
@@ -210,13 +158,11 @@ public final class OrderProxyEndpoints {
                 // 번호를 볼지 말지는 Order 의 규칙이고, 여기서 한 번 더
                 // 거르면 같은 규칙이 두 곳에 생깁니다.
                 boolean override = "true".equalsIgnoreCase(param(request.uri(), "override"));
-                // 역할은 이 서버가 봅니다 — 역할을 아는 것은 연결을 쥔 쪽뿐입니다 (§4.2).
-                KdsAuthority.Decision decision = kds.decide(KdsAuthority.Action.PICKUP, ApiGuard.currentDevice());
+                // 수령은 MAIN 의 일 — MAIN 이 끊긴 동안만 SUB 도 (비상 수령으로 남음).
+                KdsAuthority.Decision decision =
+                        kds.decide(KdsAuthority.Action.PICKUP, storeOf(orderId), caller(request.uri()));
                 if (!decision.allowed()) {
                     return forbidden(decision.reason());
-                }
-                if (otherStore(orderId) instanceof FullHttpResponse refused) {
-                    return refused;
                 }
                 return passThrough(orders.handOver(
                         orderId, param(request.uri(), "pin"),
@@ -228,7 +174,7 @@ public final class OrderProxyEndpoints {
     }
 
     /**
-     * {@code POST /orders/recall?id=1} — 번호를 다시 부릅니다.
+     * {@code POST /orders/recall?id=1&deviceId=kds-01} — 번호를 다시 부릅니다 (KDS-MAIN).
      *
      * <p>DID가 흐르는 화면이라 필요한 자리입니다: 조리가 끝난 번호가
      * 잠깐 떴다가 지나가고, 그 뒤에 온 손님에게는 다시 띄워 줘야 합니다.
@@ -247,14 +193,12 @@ public final class OrderProxyEndpoints {
             } catch (NumberFormatException notANumber) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
             }
-            KdsAuthority.Decision decision = kds.decide(KdsAuthority.Action.RECALL, ApiGuard.currentDevice());
+            KdsAuthority.Decision decision =
+                    kds.decide(KdsAuthority.Action.RECALL, storeOf(orderId), caller(request.uri()));
             if (!decision.allowed()) {
                 return forbidden(decision.reason());
             }
             try {
-                if (otherStore(orderId) instanceof FullHttpResponse refused) {
-                    return refused;
-                }
                 return passThrough(orders.recall(orderId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -284,9 +228,6 @@ public final class OrderProxyEndpoints {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "id must be a number"));
             }
             try {
-                if (otherStore(orderId) instanceof FullHttpResponse refused) {
-                    return refused;
-                }
                 return passThrough(orders.markReceived(orderId, deviceId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -297,7 +238,7 @@ public final class OrderProxyEndpoints {
     /** {@code GET /business-days/status?storeId=store-01} — whether that store has 개점'd. */
     /**
      * {@code POST /orders/start?id=&deviceId=} — 그 주방의 줄만 조리 시작 (§4.1).
-     * SUB 의 일이라 역할을 따지지 않습니다. 어느 줄인지는 누른 기기가 정합니다.
+     * 어느 줄인지는 누른 기기가 정합니다.
      */
     public RestEndpoint start() {
         return request -> {
@@ -308,9 +249,6 @@ public final class OrderProxyEndpoints {
                         Map.of("error", "id(숫자)와 deviceId 가 필요합니다"));
             }
             try {
-                if (otherStore(orderId) instanceof FullHttpResponse refused) {
-                    return refused;
-                }
                 return passThrough(orders.start(orderId, deviceId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -328,14 +266,11 @@ public final class OrderProxyEndpoints {
                         Map.of("error", "id(숫자)와 deviceId 가 필요합니다"));
             }
             KdsAuthority.Decision decision =
-                    kds.decide(KdsAuthority.Action.FORCE_PRODUCED, ApiGuard.currentDevice());
+                    kds.decide(KdsAuthority.Action.FORCE_PRODUCED, storeOf(orderId), deviceId);
             if (!decision.allowed()) {
                 return forbidden(decision.reason());
             }
             try {
-                if (otherStore(orderId) instanceof FullHttpResponse refused) {
-                    return refused;
-                }
                 return passThrough(orders.forceProduced(orderId, deviceId));
             } catch (Exception e) {
                 return unreachable(e);
@@ -345,12 +280,11 @@ public final class OrderProxyEndpoints {
 
     /**
      * {@code GET /kds/mode?storeId=} — 이 매장이 비상 모드인가 (§4.2).
-     * SUB 화면은 비상일 때만 수령 칸을 띄웁니다. 페어링된 기기면 자기 매장.
+     * 생산 KDS 화면은 비상일 때만 수령 칸을 띄웁니다.
      */
     public RestEndpoint kdsMode() {
         return request -> {
-            String storeId = ApiGuard.currentDevice().map(DeviceIdentity::storeId)
-                    .orElse(param(request.uri(), "storeId"));
+            String storeId = param(request.uri(), "storeId");
             if (storeId == null || storeId.isBlank()) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST, Map.of("error", "storeId is required"));
             }
@@ -367,20 +301,11 @@ public final class OrderProxyEndpoints {
      * {@code POST /orders/kiosk} — 캐셔 없는 POS 의 주문 (store-app.md §9).
      *
      * <p>본문: {@code {lines:[{menuCode, menuName, quantity, unitPrice, kdsDeviceId}], tranNo,
-     * payment:{method, approvalNo, amount}, memberNo}}. <b>매장·단말은 본문이 아니라 토큰의
-     * 신원</b>에서 씁니다 — KIOSK 로 페어링된 기기만 부를 수 있습니다(모드와 상관없이).
-     * Order 에는 수락된 채로 생깁니다({@code POST /orders/accepted}).
+     * payment:{method, approvalNo, amount}, memberNo, storeId, deviceId}}. 매장·단말은 다른 단말과
+     * 같이 KIOSK 가 적어 보냅니다. Order 에는 수락된 채로 생깁니다({@code POST /orders/accepted}).
      */
     public RestEndpoint kiosk() {
         return request -> {
-            java.util.Optional<DeviceIdentity> device = ApiGuard.currentDevice();
-            if (device.isEmpty()) {
-                return JsonResponses.of(HttpResponseStatus.UNAUTHORIZED,
-                        Map.of("error", "페어링된 KIOSK 만 주문을 넣습니다"));
-            }
-            if (!"KIOSK".equals(device.get().type())) {
-                return forbidden(device.get().type() + " 에서는 KIOSK 주문을 넣을 수 없습니다");
-            }
             com.fasterxml.jackson.databind.JsonNode body;
             try {
                 body = JSON.readTree(request.content().toString(StandardCharsets.UTF_8));
@@ -388,10 +313,13 @@ public final class OrderProxyEndpoints {
                 body = null;
             }
             if (body == null || !body.path("lines").isArray() || body.path("lines").isEmpty()
-                    || body.path("tranNo").asText("").isBlank()) {
+                    || body.path("tranNo").asText("").isBlank()
+                    || body.path("storeId").asText("").isBlank() || body.path("deviceId").asText("").isBlank()) {
                 return JsonResponses.of(HttpResponseStatus.BAD_REQUEST,
-                        Map.of("error", "lines 와 tranNo 가 필요합니다"));
+                        Map.of("error", "lines, tranNo, storeId, deviceId 가 필요합니다"));
             }
+            String storeId = body.path("storeId").asText();
+            String deviceId = body.path("deviceId").asText();
             // 값은 메뉴판에서 — 화면이 보낸 단가·이름·주방은 쓰지 않습니다.
             if (menuBoard == null) {
                 return JsonResponses.of(HttpResponseStatus.SERVICE_UNAVAILABLE,
@@ -399,7 +327,7 @@ public final class OrderProxyEndpoints {
             }
             KioskPricing.Result priced;
             try {
-                HttpResponse<String> board = menuBoard.menus(device.get().storeId(), null);
+                HttpResponse<String> board = menuBoard.menus(storeId, null);
                 if (board.statusCode() != 200) {
                     return JsonResponses.of(HttpResponseStatus.BAD_GATEWAY,
                             Map.of("error", "메뉴판을 읽지 못했습니다 (" + board.statusCode() + ")"));
@@ -427,7 +355,7 @@ public final class OrderProxyEndpoints {
                         "결제 금액이 메뉴판 값과 다릅니다 (메뉴판 " + total + "원) — 메뉴판이 바뀌었을 수 있습니다"));
             }
             com.fasterxml.jackson.databind.node.ObjectNode order = JSON.createObjectNode();
-            order.put("storeId", device.get().storeId());
+            order.put("storeId", storeId);
             String member = body.path("memberNo").asText("");
             order.put("customerId", member.isBlank() ? "kiosk" : member);
             order.set("lines", priced.lines());
@@ -436,7 +364,7 @@ public final class OrderProxyEndpoints {
             }
             com.fasterxml.jackson.databind.node.ObjectNode wrapper = JSON.createObjectNode();
             wrapper.set("order", order);
-            wrapper.put("deviceId", device.get().deviceId());
+            wrapper.put("deviceId", deviceId);
             wrapper.put("tranNo", body.path("tranNo").asText());
             try {
                 return passThrough(orders.createAccepted(JSON.writeValueAsString(wrapper)));

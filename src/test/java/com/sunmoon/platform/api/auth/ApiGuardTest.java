@@ -2,8 +2,6 @@ package com.sunmoon.platform.api.auth;
 
 import com.sunmoon.platform.api.auth.ApiGuard.Audience;
 import com.sunmoon.platform.api.auth.ApiGuard.Mode;
-import com.sunmoon.platform.domain.pairing.DeviceIdentity;
-import com.sunmoon.platform.domain.pairing.TerminalTokens;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -20,7 +18,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
@@ -35,9 +32,6 @@ class ApiGuardTest {
     private static final RouteKey ORDERS = new RouteKey(HttpMethod.GET, "/orders");
     private static final RouteKey MASTERS = new RouteKey(HttpMethod.GET, "/pos/masters");
     private static final RouteKey HEALTH = new RouteKey(HttpMethod.GET, "/health");
-
-    private static final TerminalTokens ONE_DEVICE = token -> "good-device".equals(token)
-            ? Optional.of(new DeviceIdentity("S001", "POS-01", "POS", null)) : Optional.empty();
 
     private final AtomicInteger calls = new AtomicInteger();
     private final RestEndpoint ok = request -> {
@@ -56,7 +50,7 @@ class ApiGuardTest {
 
     @Test
     void enforce_admin_route_needs_the_admin_token() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", ONE_DEVICE);
+        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret");
 
         assertEquals(401, status(guard, NOTICE_POST, request(NOTICE_POST)));
 
@@ -70,58 +64,17 @@ class ApiGuardTest {
         assertEquals(1, calls.get(), "거절된 요청은 엔드포인트에 닿지 않습니다");
     }
 
+    /** 단말 주소는 토큰 없이 열립니다 (2026-10-01 — 단말 토큰 제외). */
     @Test
-    void a_device_token_does_not_open_admin_routes() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", ONE_DEVICE);
-        FullHttpRequest device = request(NOTICE_POST);
-        device.headers().set("Authorization", "Device good-device");
-        assertEquals(401, status(guard, NOTICE_POST, device));
-    }
-
-    @Test
-    void the_admin_token_does_not_open_terminal_routes() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", ONE_DEVICE);
-        FullHttpRequest admin = request(ORDERS);
-        admin.headers().set("X-Admin-Token", "s3cret");
-        assertEquals(401, status(guard, ORDERS, admin));
-
-        FullHttpRequest device = request(ORDERS);
-        device.headers().set("Authorization", "Device good-device");
-        assertEquals(200, status(guard, ORDERS, device));
-    }
-
-    @Test
-    void the_endpoint_sees_which_device_called_and_it_is_gone_afterwards() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", ONE_DEVICE);
-        java.util.concurrent.atomic.AtomicReference<Optional<DeviceIdentity>> seen = new java.util.concurrent.atomic.AtomicReference<>();
-        RestEndpoint probe = request -> {
-            seen.set(ApiGuard.currentDevice());
-            return JsonResponses.of(HttpResponseStatus.OK, Map.of());
-        };
-        FullHttpRequest device = request(ORDERS);
-        device.headers().set("Authorization", "Device good-device");
-        guard.protect(Map.of(ORDERS, probe)).get(ORDERS).handle(device);
-
-        assertEquals("POS-01", seen.get().orElseThrow().deviceId());
-        assertTrue(ApiGuard.currentDevice().isEmpty());
-    }
-
-    @Test
-    void terminal_or_admin_accepts_either() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", ONE_DEVICE);
-        FullHttpRequest admin = request(MASTERS);
-        admin.headers().set("X-Admin-Token", "s3cret");
-        FullHttpRequest device = request(MASTERS);
-        device.headers().set("Authorization", "device good-device");
-
-        assertEquals(200, status(guard, MASTERS, admin));
-        assertEquals(200, status(guard, MASTERS, device));
-        assertEquals(401, status(guard, MASTERS, request(MASTERS)));
+    void terminal_routes_are_open_even_in_enforce() {
+        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret");
+        assertEquals(200, status(guard, ORDERS, request(ORDERS)));
+        assertEquals(200, status(guard, MASTERS, request(MASTERS)));
     }
 
     @Test
     void no_admin_token_configured_means_nobody_is_admin() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "  ", ONE_DEVICE);
+        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "  ");
         FullHttpRequest empty = request(NOTICE_POST);
         empty.headers().set("X-Admin-Token", "");
         assertEquals(401, status(guard, NOTICE_POST, empty));
@@ -129,7 +82,7 @@ class ApiGuardTest {
 
     @Test
     void warn_lets_everything_through() {
-        ApiGuard guard = new ApiGuard(Mode.WARN, "s3cret", TerminalTokens.NONE);
+        ApiGuard guard = new ApiGuard(Mode.WARN, "s3cret");
         assertEquals(200, status(guard, NOTICE_POST, request(NOTICE_POST)));
         assertEquals(200, status(guard, ORDERS, request(ORDERS)));
         assertEquals(2, calls.get());
@@ -137,7 +90,7 @@ class ApiGuardTest {
 
     @Test
     void public_routes_need_nothing() {
-        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret", TerminalTokens.NONE);
+        ApiGuard guard = new ApiGuard(Mode.ENFORCE, "s3cret");
         assertEquals(200, status(guard, HEALTH, request(HEALTH)));
     }
 
@@ -192,7 +145,7 @@ class ApiGuardTest {
                 "POST /reprocess/all", "POST /reprocess/one", "POST /pos/masters/version",
                 "POST /pos/notices", "POST /pos/programs/release", "GET /terminals"}) {
             Audience audience = ApiGuard.audienceOf(key(call));
-            assertTrue(audience == Audience.ADMIN || audience == Audience.TERMINAL_OR_ADMIN,
+            assertTrue(audience == Audience.ADMIN || audience == Audience.PUBLIC,
                     call + " 는 " + audience);
         }
     }

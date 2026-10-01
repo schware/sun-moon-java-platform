@@ -1,6 +1,5 @@
 package com.sunmoon.platform.transport.ws;
 
-import com.sunmoon.platform.api.auth.ApiGuard;
 import com.sunmoon.platform.domain.terminal.DeviceDirectory;
 import com.sunmoon.platform.domain.terminal.TerminalRegistry;
 import com.sunmoon.platform.transport.http.RestEndpoint;
@@ -42,26 +41,15 @@ public final class DeviceServerInitializer extends ChannelInitializer<SocketChan
     private final Executor blockingWorkExecutor;
     private final DeviceDirectory directory;
     private final TerminalRegistry registry;
-    private final ApiGuard guard;
 
     public DeviceServerInitializer(Map<RouteKey, RestEndpoint> routes,
                                    Executor blockingWorkExecutor,
                                    DeviceDirectory directory,
                                    TerminalRegistry registry) {
-        this(routes, blockingWorkExecutor, directory, registry, null);
-    }
-
-    /** {@code guard} 가 있으면 WebSocket 핸드셰이크도 같은 모드·같은 토큰으로 확인합니다. */
-    public DeviceServerInitializer(Map<RouteKey, RestEndpoint> routes,
-                                   Executor blockingWorkExecutor,
-                                   DeviceDirectory directory,
-                                   TerminalRegistry registry,
-                                   ApiGuard guard) {
         this.routes = routes;
         this.blockingWorkExecutor = blockingWorkExecutor;
         this.directory = directory;
         this.registry = registry;
-        this.guard = guard;
     }
 
     @Override
@@ -70,9 +58,7 @@ public final class DeviceServerInitializer extends ChannelInitializer<SocketChan
         pipeline.addLast(new HttpServerCodec());
         pipeline.addLast(new HttpObjectAggregator(MAX_AGGREGATED_CONTENT_BYTES));
         // Order matters: identify, then upgrade, then handle frames.
-        pipeline.addLast(guard == null
-                ? new TerminalHandshakeHandler(directory)
-                : new TerminalHandshakeHandler(directory, guard.terminals(), guard.mode(), registry));
+        pipeline.addLast(new TerminalHandshakeHandler(directory, registry));
         // checkStartsWith, because a terminal identifies itself in the query
         // string and Netty's default compares the whole URI to the path —
         // "/ws?deviceId=pos-01" would simply not be recognised as /ws.

@@ -1,7 +1,5 @@
 package com.sunmoon.platform.api.auth;
 
-import com.sunmoon.platform.domain.pairing.DeviceIdentity;
-import com.sunmoon.platform.domain.pairing.TerminalTokens;
 import com.sunmoon.platform.transport.http.JsonResponses;
 import com.sunmoon.platform.transport.http.RestEndpoint;
 import com.sunmoon.platform.transport.http.RouteKey;
@@ -16,7 +14,6 @@ import java.security.MessageDigest;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -29,14 +26,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * 공지를 띄우고, 매장을 마감시키고, 프로그램 배포를 등록할 수 있었습니다.
  * 마지막 것은 Electron 자동 업데이트와 만나면 원격 코드 실행이 됩니다.
  *
- * <h2>청중 셋</h2>
+ * <h2>청중 둘</h2>
  *
  * <ul>
- *   <li>{@link Audience#PUBLIC} — 확인 없음. health, 기준 시각, 지표.
- *   <li>{@link Audience#TERMINAL} — 기기 토큰 ({@code Authorization: Device <token>}).
+ *   <li>{@link Audience#PUBLIC} — 확인 없음. health, 기준 시각, 지표, 그리고 <b>단말이 부르는
+ *       주소 전부</b>. 단말 토큰은 두지 않습니다(2026-10-01 Sun&Moon 결정 — 단말의 API 토큰은
+ *       결국 장비 토큰이 되므로 제외). 단말은 매장·장비 ID 를 요청에 적어 보냅니다.
  *   <li>{@link Audience#ADMIN} — 관리 토큰 ({@code X-Admin-Token}). BO 가 보냅니다.
- *   <li>{@link Audience#TERMINAL_OR_ADMIN} — 단말도 BO 도 읽는 주소
- *       (배포 계획은 장비가 가져가고 BO 가 들여다봅니다).
  * </ul>
  *
  * <h2>표 하나, 모르는 주소는 관리</h2>
@@ -58,14 +54,13 @@ public final class ApiGuard {
 
     public enum Mode { OFF, WARN, ENFORCE }
 
-    public enum Audience { PUBLIC, TERMINAL, ADMIN, TERMINAL_OR_ADMIN }
+    public enum Audience { PUBLIC, ADMIN }
 
     /**
      * 주소마다 청중. 여기 없는 주소는 {@link Audience#ADMIN}.
      *
-     * <p>BO 가 부르는 주소(HttpPosOpsRepository, HttpTerminalDirectory)는 전부
-     * ADMIN 이거나 TERMINAL_OR_ADMIN 이어야 합니다 — 안 그러면 enforce 에서
-     * BO 화면이 깨집니다.
+     * <p>BO 가 부르는 주소(HttpPosOpsRepository, HttpTerminalDirectory)는 ADMIN 이거나
+     * 단말과 같이 읽는 PUBLIC 이어야 합니다 — 안 그러면 enforce 에서 BO 화면이 깨집니다.
      */
     static final Map<RouteKey, Audience> AUDIENCE = new LinkedHashMap<>();
 
@@ -77,9 +72,8 @@ public final class ApiGuard {
         // 관리로 두면 긁기가 막힙니다. 지표는 기계의 사실이라 공개로 둡니다 —
         // store-app.md §2.2 와 다른 점으로 적어 둡니다.
         put(HttpMethod.GET, "/metrics", Audience.PUBLIC);
-        // 페어링은 코드 자체가 증명입니다 (§3.4). 무차별 대입은 PairingService 가 막습니다.
-        put(HttpMethod.POST, "/pos/pair", Audience.PUBLIC);
 
+        // 단말 — 토큰 없이 엽니다 (2026-10-01, 위 설명).
         for (String path : new String[] {
                 "/orders/status", "/orders/pickup", "/orders/recall", "/orders/received",
                 "/sales", "/etc-sales", "/pos/business", "/pos/heartbeat",
@@ -87,42 +81,29 @@ public final class ApiGuard {
                 "/business-days/open", "/business-days/close",
                 "/orders/start", "/orders/force-produced", "/orders/kiosk",
                 "/pos/print-jobs/ack", "/pos/print-jobs/reprint", "/pos/kiosk/unlock"}) {
-            put(HttpMethod.POST, path, Audience.TERMINAL);
+            put(HttpMethod.POST, path, Audience.PUBLIC);
         }
         for (String path : new String[] {
                 "/orders", "/pos/notices", "/menus", "/business-days/status", "/kds/mode",
-                "/pos/printers", "/pos/print-jobs"}) {
-            put(HttpMethod.GET, path, Audience.TERMINAL);
+                "/pos/printers", "/pos/print-jobs",
+                // 장비가 가져가고 BO 도 들여다봅니다.
+                "/pos/masters", "/pos/programs"}) {
+            put(HttpMethod.GET, path, Audience.PUBLIC);
         }
-        // 장비가 가져가고 BO 도 들여다봅니다.
-        put(HttpMethod.GET, "/pos/masters", Audience.TERMINAL_OR_ADMIN);
-        put(HttpMethod.GET, "/pos/programs", Audience.TERMINAL_OR_ADMIN);
 
         // 관리 — 표에 없어도 관리지만, 적어 두면 "잊은 것" 과 "정한 것" 이 구분됩니다.
         for (String path : new String[] {
                 "/terminals", "/sales/totals", "/etc-sales/totals", "/pos/business",
                 "/pos/business/history", "/pos/live", "/pos/masters/pending", "/reprocess",
-                "/pos/programs/status", "/pos/notices/all", "/pos/devices"}) {
+                "/pos/programs/status", "/pos/notices/all"}) {
             put(HttpMethod.GET, path, Audience.ADMIN);
         }
         for (String path : new String[] {
                 "/terminals/push", "/terminals/broadcast", "/pos/masters/version",
                 "/reprocess/one", "/reprocess/all", "/pos/programs/release", "/pos/notices",
-                "/orders/legacy", "/pos/pairing-codes", "/pos/devices/revoke", "/pos/devices/kiosk-pin"}) {
+                "/orders/legacy", "/pos/devices/kiosk-pin"}) {
             put(HttpMethod.POST, path, Audience.ADMIN);
         }
-    }
-
-    /**
-     * 지금 처리 중인 요청을 보낸 기기. 단말 토큰이 확인된 요청에서만 있습니다.
-     *
-     * <p>엔드포인트는 요청만 받으므로 신원을 여기로 넘깁니다. 엔드포인트 호출은
-     * 동기(응답을 돌려줌)라 같은 스레드에서 끝나고, 끝나면 지웁니다.
-     */
-    private static final ThreadLocal<DeviceIdentity> CURRENT = new ThreadLocal<>();
-
-    public static Optional<DeviceIdentity> currentDevice() {
-        return Optional.ofNullable(CURRENT.get());
     }
 
     private static void put(HttpMethod method, String path, Audience audience) {
@@ -135,17 +116,15 @@ public final class ApiGuard {
 
     private final Mode mode;
     private final byte[] adminToken;
-    private final TerminalTokens terminals;
 
     /** 같은 이유의 실패를 1분에 한 번만 로그로 — 단말이 15초마다 부릅니다. */
     private final Map<String, Long> lastLogged = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> suppressed = new ConcurrentHashMap<>();
 
-    public ApiGuard(Mode mode, String adminToken, TerminalTokens terminals) {
+    public ApiGuard(Mode mode, String adminToken) {
         this.mode = mode;
         this.adminToken = adminToken == null || adminToken.isBlank()
                 ? null : adminToken.getBytes(StandardCharsets.UTF_8);
-        this.terminals = terminals == null ? TerminalTokens.NONE : terminals;
         if (mode != Mode.OFF && this.adminToken == null) {
             log.warn("ADMIN_TOKEN 이 없습니다 — 관리 주소를 증명할 방법이 없습니다. "
                     + "enforce 에서는 BO 를 포함해 모든 관리 요청이 거절됩니다");
@@ -155,10 +134,6 @@ public final class ApiGuard {
 
     public Mode mode() {
         return mode;
-    }
-
-    public TerminalTokens terminals() {
-        return terminals;
     }
 
     public static Mode modeFrom(String raw) {
@@ -195,7 +170,7 @@ public final class ApiGuard {
         return request -> {
             Verdict verdict = check(audience, request);
             if (verdict.ok()) {
-                return handleAs(verdict.identity().orElse(null), endpoint, request);
+                return endpoint.handle(request);
             }
             report(key, verdict.reason());
             if (mode == Mode.WARN) {
@@ -206,38 +181,20 @@ public final class ApiGuard {
         };
     }
 
-    private static io.netty.handler.codec.http.FullHttpResponse handleAs(
-            DeviceIdentity device, RestEndpoint endpoint, FullHttpRequest request) {
-        if (device == null) {
-            return endpoint.handle(request);
-        }
-        CURRENT.set(device);
-        try {
-            return endpoint.handle(request);
-        } finally {
-            CURRENT.remove();
-        }
-    }
-
-    record Verdict(boolean ok, String reason, Optional<DeviceIdentity> identity) {
-        static Verdict pass(Optional<DeviceIdentity> identity) {
-            return new Verdict(true, null, identity);
+    record Verdict(boolean ok, String reason) {
+        static Verdict pass() {
+            return new Verdict(true, null);
         }
 
         static Verdict fail(String reason) {
-            return new Verdict(false, reason, Optional.empty());
+            return new Verdict(false, reason);
         }
     }
 
     Verdict check(Audience audience, FullHttpRequest request) {
-        boolean admin = isAdmin(request);
-        Optional<DeviceIdentity> device = device(request);
         return switch (audience) {
-            case PUBLIC -> Verdict.pass(Optional.empty());
-            case ADMIN -> admin ? Verdict.pass(Optional.empty()) : Verdict.fail("NO_ADMIN_TOKEN");
-            case TERMINAL -> device.isPresent() ? Verdict.pass(device) : Verdict.fail("NO_DEVICE_TOKEN");
-            case TERMINAL_OR_ADMIN -> admin || device.isPresent()
-                    ? Verdict.pass(device) : Verdict.fail("NO_TOKEN");
+            case PUBLIC -> Verdict.pass();
+            case ADMIN -> isAdmin(request) ? Verdict.pass() : Verdict.fail("NO_ADMIN_TOKEN");
         };
     }
 
@@ -249,14 +206,6 @@ public final class ApiGuard {
         // 길이까지 새지 않게 상수 시간 비교.
         return given != null
                 && MessageDigest.isEqual(adminToken, given.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private Optional<DeviceIdentity> device(FullHttpRequest request) {
-        String header = request.headers().get("Authorization");
-        if (header == null || !header.regionMatches(true, 0, "Device ", 0, 7)) {
-            return Optional.empty();
-        }
-        return terminals.resolve(header.substring(7).trim());
     }
 
     private void report(RouteKey key, String reason) {

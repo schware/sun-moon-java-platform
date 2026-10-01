@@ -1,6 +1,6 @@
-package com.sunmoon.platform.domain.pairing;
+package com.sunmoon.platform.domain.kiosk;
 
-import com.sunmoon.platform.infrastructure.pairing.JdbcKioskPinStore;
+import com.sunmoon.platform.infrastructure.kiosk.JdbcKioskPinStore;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
