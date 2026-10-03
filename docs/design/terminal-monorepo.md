@@ -1,7 +1,8 @@
 # 설계 — 단말 화면 셋을 한 저장소로 (POS · KDS · DID)
 
 - 결정: 2026-10-03 Sun&Moon — **안 ② 한 저장소** ([HANDOFF-2026-10-03](../HANDOFF-2026-10-03.md) §4-1)
-- 상태: **설계 완료, 구현 전**. 구현은 아래 §7 의 순서대로 한 단계씩, 단계마다 §8 의 확인을 통과한 뒤 다음으로.
+- 상태: **구현·배포 완료 (2026-10-03)** — [sun-moon-terminals](https://github.com/schware/sun-moon-terminals), 옛 저장소 셋은 archive.
+  §2 의 "빌드 없는 공통 패키지" 방식이 그대로 됐습니다(각 화면의 `tsc -b` 가 공통 파일의 오류도 잡는 것을 확인) — §6-1 대안은 쓰지 않음.
 - 범위: 웹 단말 화면 세 저장소(`sun-moon-terminal-pos`, `-kds`, `-did`). **셸(`sun-moon-store-app`)과 손님 화면
   (`channel-order`)은 옮기지 않습니다** — 셸은 Electron 이라 빌드·배포가 다르고, 손님 화면은 Spring 서비스 안에 있습니다.
 

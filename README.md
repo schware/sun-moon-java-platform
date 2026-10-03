@@ -27,7 +27,7 @@
 | **channel-order** | [sun-moon-java-platform-channel-order](https://github.com/schware/sun-moon-java-platform-channel-order) | [`channel-order/`](channel-order) | `:8085/channel-order/` 공개 | 손님 창구 — QR 웹, 앱 API, KIOSK 화면 |
 | **BO** | [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) | [`bo/`](bo) | `:8080/bo/` LAN | 기준정보·장비·매출 조회·관제 (React 콘솔 포함) |
 | **Device Server** | 이 GitHub 저장소의 **`master` 브랜치** | — | `:8087` 공개 | 단말 연결(WebSocket)·매출 원본·라벨·운영 (Netty) |
-| **POS · KDS · DID 화면** | [pos](https://github.com/schware/sun-moon-terminal-pos) · [kds](https://github.com/schware/sun-moon-terminal-kds) · [did](https://github.com/schware/sun-moon-terminal-did) | — | `:8000/pos/` `/kds/` `/did/` | 매장 단말 웹 화면 (nginx 가 번들을 줌) |
+| **POS · KDS · DID 화면** | [sun-moon-terminals](https://github.com/schware/sun-moon-terminals) (private, `pos/` `kds/` `did/` + 공통 `common/`) — 2026-10-03 에 셋을 합침, 옛 저장소는 archive | — | `:8000/pos/` `/kds/` `/did/` | 매장 단말 웹 화면 (nginx 가 번들을 줌) |
 | **매장 단말 셸** | [sun-moon-store-app](https://github.com/schware/sun-moon-store-app) (private) | — | — | POS·KIOSK·KDS-MAIN 용 Electron 셸 — 매장에는 아직 없음 |
 | 서버 설정 | [Debian-Setting](https://github.com/schware/Debian-Setting) | — | — | 배포·DB·비밀 위치 |
 | KDS · Delivery | [kds](https://github.com/schware/sun-moon-java-platform-kds) · [delivery](https://github.com/schware/sun-moon-java-platform-delivery) | [`kds/`](kds) [`delivery/`](delivery) | `:8081` · `:8082` | 처음 MSA 로 나눌 때의 서비스. 컨테이너는 떠 있지만 지금의 주문 흐름(FLOW.md)에는 없음 |
@@ -62,9 +62,7 @@ submodule 이 아닌 것 (Device Server, 단말 화면, 셸):
 
 ```
 git clone -b master https://github.com/schware/sun-moon-java-platform.git sun-moon-device-server
-git clone https://github.com/schware/sun-moon-terminal-pos.git
-git clone https://github.com/schware/sun-moon-terminal-kds.git
-git clone https://github.com/schware/sun-moon-terminal-did.git
+git clone https://github.com/schware/sun-moon-terminals.git
 git clone https://github.com/schware/sun-moon-store-app.git
 ```
 
