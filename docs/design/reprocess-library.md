@@ -1,8 +1,8 @@
 # 설계 — 실패 재처리 공통 라이브러리
 
 - 결정: 2026-10-03 Sun&Moon — **안 ③ 공통 라이브러리** ([HANDOFF-2026-10-03](../HANDOFF-2026-10-03.md) §4-2)
-- 상태: **구현 중 (2026-10-03)** — §8 의 1·2·4·5 코드 완료, 3 은 주소까지(처리기 `APP_SEND` 는 결정 대기),
-  6 배포는 java-common deploy key 등록 대기. 기록은 [§11](#11-구현-기록-2026-10-03).
+- 상태: **배포됨 (2026-10-03 21:10)** — §8 의 1·2·4·5·6 완료, 3 은 주소까지(처리기 `APP_SEND` 는 결정 대기).
+  기록은 [§11](#11-구현-기록-2026-10-03).
 - 관련: 업무 정의서 §5.8(배치)·§10, APP-SERVER §4.4.6, umbrella ADR-0012(거절은 못 닿음이 아니다)
 
 ---
@@ -147,7 +147,16 @@ Device Server 의 kind 는 이미 BO 화면에 쓰이고 있어 **이름을 바�
 | 3 APP-SERVER — 주소만 | sun-moon-java-platform-app-server | `1e49aef` | 69 |
 | 4 Order — `ORDER_EVENT` | sun-moon-java-platform-order | `05e0490` | 117 |
 | 5 BO — 세 곳을 한 화면 | sun-moon-java-platform-bo | `daefa94` | 92 (+ 화면 typecheck) |
-| 6 서버 | Debian-Setting `deploy.sh` | `e524a96` | 배포는 deploy key 대기 |
+| 6 서버 | Debian-Setting `deploy.sh` | `e524a96` | deploy key 등록(Sun&Moon) 뒤 Device Server → APP-SERVER → Order → BO 배포 |
+
+서버 확인 (21:00~21:10):
+- Device Server `/reprocess` — 배포 전에 저장한 응답(`/srv/sunmoon/logs/reprocess-before*.json`)과 **글자까지 같음**
+  (전 매장·store-01 둘 다)
+- APP-SERVER `/reprocess` → `{"storeId":"","total":0,"kinds":[]}`
+- Order — Flyway V16 → V17 적용. 없는 주문(999999999)으로 실패 한 줄을 넣어 `/reprocess?storeId=store-test` 에
+  나오는 것 확인(`failedAt` ISO). 그 줄은 BO 화면에서 "다시" 를 눌러 보는 시험용으로 남김 — 누르면 "주문이 없어
+  낼 것이 없습니다 — 기록만 닫았습니다" 가 나와야 함(발행하지 않음)
+- BO — health 200, `/api/reprocess` 는 로그인 없이 401
 
 ### 11-1. `APP_SEND` 가 설계대로 안 되는 이유
 
