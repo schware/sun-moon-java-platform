@@ -29,6 +29,7 @@
 | **Device Server** | 이 GitHub 저장소의 **`master` 브랜치** | — | `:8087` 공개 | 단말 연결(WebSocket)·매출 원본·라벨·운영 (Netty) |
 | **POS · KDS · DID 화면** | [sun-moon-terminals](https://github.com/schware/sun-moon-terminals) (private, `pos/` `kds/` `did/` + 공통 `common/`) — 2026-10-03 에 셋을 합침, 옛 저장소는 archive | — | `:8000/pos/` `/kds/` `/did/` | 매장 단말 웹 화면 (nginx 가 번들을 줌) |
 | **매장 단말 셸** | [sun-moon-store-app](https://github.com/schware/sun-moon-store-app) (private) | — | — | POS·KIOSK·KDS-MAIN 용 Electron 셸 — 매장에는 아직 없음 |
+| Java 공통 틀 | [sun-moon-java-common](https://github.com/schware/sun-moon-java-common) (private) — 2026-10-03 | — | — | 실패 재처리의 틀(`reprocess`). Device Server·Order·APP-SERVER 가 submodule 로 씀 — [설계](docs/design/reprocess-library.md) |
 | 서버 설정 | [Debian-Setting](https://github.com/schware/Debian-Setting) | — | — | 배포·DB·비밀 위치 |
 | KDS · Delivery | [kds](https://github.com/schware/sun-moon-java-platform-kds) · [delivery](https://github.com/schware/sun-moon-java-platform-delivery) | [`kds/`](kds) [`delivery/`](delivery) | `:8081` · `:8082` | 처음 MSA 로 나눌 때의 서비스. 컨테이너는 떠 있지만 지금의 주문 흐름(FLOW.md)에는 없음 |
 
