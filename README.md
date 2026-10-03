@@ -10,6 +10,8 @@
 3. [`docs/HANDOFF-2026-10-03.md`](docs/HANDOFF-2026-10-03.md) — 새 서버(Debian 13), 도메인, 최근 정리, 공통화 선택지 (그 앞은 [10-01](docs/HANDOFF-2026-10-01.md) · [09-29](docs/HANDOFF-2026-09-29.md))
 4. 설계: [`docs/design/store-app.md`](docs/design/store-app.md) (매장 단말) ·
    [`docs/design/customer-app.md`](docs/design/customer-app.md) (손님 앱)
+   · 공통화(10-03 결정, 구현 전): [`terminal-monorepo.md`](docs/design/terminal-monorepo.md) (단말 화면 한 저장소) ·
+   [`reprocess-library.md`](docs/design/reprocess-library.md) (재처리 공통 라이브러리)
 5. Spring 서비스들의 공통 규칙: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 규칙이 아니라 돌려 보는 명령으로
 
 ## 전체 구성 (2026-09-29)
