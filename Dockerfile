@@ -9,6 +9,8 @@ COPY gradle ./gradle
 COPY build.gradle.kts settings.gradle.kts ./
 COPY core/gradle ./core/gradle
 COPY core/build.gradle.kts core/settings.gradle.kts ./core/
+# 공통 틀(sun-moon-java-common, submodule) — 작아서 통째로.
+COPY java-common ./java-common
 # The wrapper is 755 in git, but a build context copied from a Windows
 # checkout loses the bit — set it explicitly rather than depend on the host.
 RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies --configuration runtimeClasspath > /dev/null

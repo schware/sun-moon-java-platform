@@ -29,7 +29,7 @@ import com.sunmoon.platform.domain.sale.DecomposedSale;
 import com.sunmoon.platform.domain.sale.SaleDecomposeException;
 import com.sunmoon.platform.domain.reprocess.MasterReprocessor;
 import com.sunmoon.platform.domain.reprocess.ProgramReprocessor;
-import com.sunmoon.platform.domain.reprocess.ReprocessService;
+import com.sunmoon.common.reprocess.ReprocessService;
 import com.sunmoon.platform.domain.sale.SaleRepository;
 import com.sunmoon.platform.domain.pos.MasterDispatchService;
 import com.sunmoon.platform.domain.pos.NoticeService;

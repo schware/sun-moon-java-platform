@@ -25,6 +25,7 @@ dependencies {
     // Netty, Jackson, MyBatis and Bean Validation arrive through it as `api`
     // dependencies; Hikari, the Postgres driver and Flyway arrive at runtime.
     implementation("com.sunmoon:sun-moon-platform-core:0.1.0")
+    implementation("com.sunmoon:sun-moon-reprocess:0.1.0")
 
     implementation("org.quartz-scheduler:quartz:2.3.2")
     implementation("org.redisson:redisson:3.37.0")

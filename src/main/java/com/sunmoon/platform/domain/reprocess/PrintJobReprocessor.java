@@ -1,5 +1,8 @@
 package com.sunmoon.platform.domain.reprocess;
 
+import com.sunmoon.common.reprocess.FailedItem;
+import com.sunmoon.common.reprocess.Reprocessor;
+
 import com.sunmoon.platform.domain.print.PrintJob;
 import com.sunmoon.platform.domain.print.PrintJobStore;
 

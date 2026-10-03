@@ -7,3 +7,5 @@ rootProject.name = "sun-moon-java-platform"
 // build costs nothing and keeps "edit the kernel, see it break here" a
 // single Gradle invocation (docs/adr/0014).
 includeBuild("core")
+// 실패 재처리 틀 등 서비스들이 같이 쓰는 것 (umbrella docs/design/reprocess-library.md).
+includeBuild("java-common")

@@ -1,3 +1,6 @@
 [submodule "core"]
 	path = core
 	url = https://github.com/schware/sun-moon-platform-core.git
+[submodule "java-common"]
+	path = java-common
+	url = https://github.com/schware/sun-moon-java-common.git

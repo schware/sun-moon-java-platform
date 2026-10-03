@@ -1,5 +1,8 @@
 package com.sunmoon.platform.domain.reprocess;
 
+import com.sunmoon.common.reprocess.FailedItem;
+import com.sunmoon.common.reprocess.Reprocessor;
+
 import com.sunmoon.platform.domain.pos.MasterDispatch;
 import com.sunmoon.platform.domain.pos.MasterRepository;
 import com.sunmoon.platform.domain.pos.MasterType;
