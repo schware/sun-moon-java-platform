@@ -7,7 +7,7 @@
 
 1. [`docs/FLOW.md`](docs/FLOW.md) — **지금 전체가 어떻게 동작하는가** (한 장 그림, 주문의 일생, 켜는 스위치)
 2. [`docs/REVIEW-2026-09-29.md`](docs/REVIEW-2026-09-29.md) — 기능 확인표 (어디서 보나, 근거, 상태)
-3. [`docs/HANDOFF-2026-10-01.md`](docs/HANDOFF-2026-10-01.md) — 최근에 정한 것·바뀐 것, 배포할 때, 남은 것 (그 앞은 [09-29](docs/HANDOFF-2026-09-29.md))
+3. [`docs/HANDOFF-2026-10-03.md`](docs/HANDOFF-2026-10-03.md) — 새 서버(Debian 13), 도메인, 최근 정리, 공통화 선택지 (그 앞은 [10-01](docs/HANDOFF-2026-10-01.md) · [09-29](docs/HANDOFF-2026-09-29.md))
 4. 설계: [`docs/design/store-app.md`](docs/design/store-app.md) (매장 단말) ·
    [`docs/design/customer-app.md`](docs/design/customer-app.md) (손님 앱)
 5. Spring 서비스들의 공통 규칙: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 규칙이 아니라 돌려 보는 명령으로
