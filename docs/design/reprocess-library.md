@@ -138,6 +138,10 @@ Device Server 의 kind 는 이미 BO 화면에 쓰이고 있어 **이름을 바�
 | 2 | 새 kind 이름 | 서비스 접두사 — `APP_SEND`, `ORDER_EVENT` |
 | 3 | Order 실패 이벤트를 다시 발행할 때 **옛 상태의 이벤트**를 그대로 보낼지, 지금 주문 상태로 새로 만들지 | **지금 상태로 새로** — 이벤트는 "바뀌었다"는 신호이고 받는 쪽이 다시 읽으므로(FLOW §9), 옛 상태를 그대로 보내면 늦게 온 신호가 화면을 되돌릴 수 있음 |
 
+> **이어진 것 (2026-10-09):** 업무 정의서 §5.8 의 찾아내는 배치 넷이 이 틀 위에 올라갔습니다 — Order 의
+> `ORDER_NOT_RECEIVED`·`ORDER_STALLED`·`ORDER_DUPLICATE`, APP-SERVER 의 `CHANNEL_MISMATCH`. 라이브러리 0.2.0 에
+> `retryable`(거짓이면 BO 가 "다시" 를 숨김). → [`oms-batch-detection.md`](oms-batch-detection.md)
+
 ## 11. 구현 기록 (2026-10-03)
 
 | 단계 | 저장소 | 커밋 | 시험 |
