@@ -21,12 +21,20 @@ macpro 는 image 를 받아 띄우기만 합니다. dell 쪽 서버 구성은 De
 | 포트 | 서비스 | 노출 |
 |---|---|---|
 | 8000 | 첫 화면 + POS·KDS·DID 화면 (nginx, `-p`) | 공개 |
-| 8080 | BO | LAN |
-| 8083 | Order | LAN |
+| 8080 | BO | 허용 IP |
+| 8083 | Order | 허용 IP |
 | 8085 | channel-order (QR 웹·KIOSK) | 공개 |
-| 8086 | APP-SERVER | LAN |
+| 8086 | APP-SERVER | 허용 IP |
 | 8087 | Device Server | 공개 |
 | 5432 · 6379 | PostgreSQL · Redis | localhost |
+
+**허용 IP** 는 ufw 로 정합니다 — 작업하는 곳의 공인 IP 와 LAN(`192.168.0.0/24`)만 엽니다(KEDP 의 허용 목록과 같은
+생각). 허용한 곳에서는 공인 주소 `61.73.134.2:<포트>` 로 엽니다. 작업하는 곳의 공인 IP 가 바뀌면 규칙을 다시 넣습니다:
+
+```bash
+sudo ufw allow from <공인 IP> to any port 8080,8083,8086 proto tcp
+sudo ufw status numbered        # 옛 IP 규칙은 번호로 지움: sudo ufw delete <번호>
+```
 
 서비스는 `--network host` 라 ufw 가 그대로 적용됩니다. `-p` 로 연 8000 은 Docker 가 iptables 를 직접 열어
 ufw 와 관계없이 공개됩니다.
@@ -57,7 +65,7 @@ SUNMOON_HOST=mac-debian scripts/deploy.sh pos   # kds | did
 2. `(sudo)` 방화벽 — SSH 포트를 먼저 엽니다:
    ```bash
    sudo ufw allow 922/tcp && sudo ufw allow 8085/tcp && sudo ufw allow 8087/tcp
-   sudo ufw allow from 192.168.0.0/24 to any port 8080,8083,8086 proto tcp
+   for ip in <허용할 공인 IP …> 192.168.0.0/24; do sudo ufw allow from $ip to any port 8080,8083,8086 proto tcp; done
    ```
 3. `(sudo)` Redis: `echo 'vm.overcommit_memory = 1' | sudo tee /etc/sysctl.d/90-redis.conf && sudo sysctl --system`
 4. 폴더와 script: `mkdir -p /srv/sunmoon/{env,data,logs,nginx/html,bin} && chmod 700 /srv/sunmoon/env`,
