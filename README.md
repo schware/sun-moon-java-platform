@@ -14,9 +14,11 @@
    [`reprocess-library.md`](docs/design/reprocess-library.md) (재처리 공통 라이브러리)
 5. Spring 서비스들의 공통 규칙: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 규칙이 아니라 돌려 보는 명령으로
 
-## 전체 구성 (2026-09-29)
+## 전체 구성 (2026-11-08)
 
-전부 Debian 서버(192.168.0.2)에 서비스마다 Docker 컨테이너 하나로 돕니다. 빌드·배포는
+서비스마다 Docker 컨테이너 하나로 돕니다. **2026-11-08 부터 실행은 macpro-debian(공개 `61.73.134.2`),
+빌드는 dell-debian** 에서 합니다 — 배포 절차와 한 줄 배포 script(`scripts/ship.sh`)는
+[`docs/DEPLOY-MACPRO.md`](docs/DEPLOY-MACPRO.md). 그 전의 서버 구성은
 [`Debian-Setting/docs/docker.md`](https://github.com/schware/Debian-Setting/blob/master/docs/docker.md),
 비밀의 위치는 같은 저장소의 `docs/secrets.md` (값은 어디에도 적지 않음).
 
