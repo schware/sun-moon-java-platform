@@ -111,7 +111,7 @@ other direction — `render.yaml` set it to `true`, correctly, for Render's TLS.
 ## A finding worth acting on separately
 
 `sun-moon-java-platform-order`'s `application.yml` carries its database
-password in plaintext (`sunmoon_dev_pw`), and that repository is
+password in plaintext, and that repository is
 **public**. It is a LAN-only development database, so the practical risk
 is low, but it is a pattern an interviewer reading the portfolio would
 notice. Worth moving to an environment variable in that repo — this one
