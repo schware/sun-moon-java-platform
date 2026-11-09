@@ -83,7 +83,7 @@ KDS-MAIN 은 주방의 **결정권자**이지 저장소가 아닙니다.
 | 관리 | `X-Admin-Token` (BO 만 가짐) | `/terminals…`, `/pos/notices`(등록), `/pos/programs/release`, `/reprocess…`, `/pos/devices/kiosk-pin` |
 
 표에 없는 주소는 **관리**로 봅니다(잊으면 닫히는 쪽으로). 시험이 Bootstrap 의 주소를 전부 읽어
-청중이 정해졌는지 확인합니다. 지금 모드는 `API_AUTH=warn` — `enforce` 로 올려도 닫히는 것은 관리 주소뿐입니다.
+청중이 정해졌는지 확인합니다. 지금 모드는 **`API_AUTH=enforce`**(2026-11-09) — 닫히는 것은 관리 주소뿐이고, 토큰 없는 관리 요청은 401 입니다.
 
 ---
 
@@ -238,11 +238,11 @@ FAILED ─→ BO 재처리의 다섯 번째 종류 PRINT ─→ 다시 줄 세�
 
 | 스위치 | 어디 | 지금 | 켤 때 |
 |---|---|---|---|
-| `API_AUTH` | `~/apps/docker/sun-moon-device.env` | `warn` | `NO_ADMIN_TOKEN` 로그가 조용하면 `enforce` (관리 주소만 닫힘) |
+| `API_AUTH` | macpro `/srv/sunmoon/env/device.env` | **`enforce`** (2026-11-09) | — 관리 주소만 닫힘. 코드 기본값은 `warn` 이라 env 를 빠뜨리면 다시 열립니다 |
 | `ADMIN_TOKEN` / `DEVICE_SERVER_ADMIN_TOKEN` | 위 파일 / BO `.env` (같은 값) | 설정됨 | 교체는 `secrets.md` G |
 | `DEVICE_DIRECTORY` | Device Server run 줄 | `bo` | — |
 | `APP_CORS_ORIGINS` | channel-order | 기본값(`https://localhost, capacitor://localhost`) | 앱 출처가 바뀌면 |
-| `SUNMOON_UI_UPDATES` | 셸 환경 | 꺼짐 | **`API_AUTH=enforce` 뒤에** `on` |
+| `SUNMOON_UI_UPDATES` | 셸 환경 | 꺼짐 | `API_AUTH=enforce` 가 켜졌으므로 이제 `on` 가능 |
 | `PUSH_EVENTS_REDIS`, `FCM_PROJECT_ID`, `FCM_CREDENTIALS_FILE` | APP-SERVER run 줄 | 없음(푸시 꺼짐) | Firebase 프로젝트와 앱(A3)이 생기면 — `secrets.md` I |
 
 Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼먹으면** 인증이 조용히 기본값이
@@ -252,7 +252,7 @@ Device Server 를 다시 띄울 때 **`--env-file sun-moon-device.env` 를 빼�
 
 ## 12. 남은 것
 
-- **`API_AUTH=enforce`** — 관리 주소만 닫습니다(Sun&Moon 결정)
+- ~~`API_AUTH=enforce`~~ — 2026-11-09 켬(관리 주소만 닫힘, Sun&Moon 결정)
 - **실물 프린터** 확인, 코드 서명 인증서(그 뒤 셸 자체 업데이트)
 - 진짜 VAN (그때 KIOSK 는 결제수단 확인을 승인 **전**으로)
 - 손님 앱 A3(Android 껍데기 — Android SDK 필요) · A4 앱 쪽(푸시 권한·토큰 등록 — Firebase 프로젝트 필요).

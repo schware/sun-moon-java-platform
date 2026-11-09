@@ -84,7 +84,7 @@ SUNMOON_HOST=mac-debian scripts/deploy.sh pos   # kds | did
    와 같고, 다른 것은:
    - DB 비밀번호 **네 곳 모두** `SUNMOON_DB_PASSWORD` 와 같은 값 — bo 하나만 달라도 BO 가 재시작을 반복합니다
    - BO `DEVICE_SERVER_ADMIN_TOKEN` = Device `ADMIN_TOKEN`
-   - BO `QR_TABLE_BASE_URL=http://sunmoonwork.duckdns.org:8085/channel-order/t/`, Device `API_AUTH=warn`
+   - BO `QR_TABLE_BASE_URL=http://sunmoonwork.duckdns.org:8085/channel-order/t/`, Device `API_AUTH=enforce` (관리 주소는 `X-Admin-Token` 없으면 401)
 9. 기동 순서 — **fdw 는 정해진 자리에서만**:
    ```bash
    up.sh bo
