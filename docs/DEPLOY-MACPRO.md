@@ -8,13 +8,13 @@ macpro 는 image 를 받아 띄우기만 합니다. dell 쪽 서버 구성은 De
 |---|---|---|
 | 하는 일 | **빌드** (`docker build`) | **실행** (컨테이너) |
 | 하드웨어 | i5 M 480 4코어 · RAM 5.6GB | 2코어 · RAM 3.6GB · swap 3GB |
-| 공개 주소 | — | `61.73.134.2` (`enp3s0` 에 바로 붙음, 공유기 없음) |
+| 공개 주소 | — | **`sunmoonwork.duckdns.org`** (공인 IP 는 DuckDNS 에서 관리, `enp3s0` 에 바로 붙음, 공유기 없음) |
 | LAN | 192.168.0.2 | 192.168.0.65 (Wi-Fi) |
 | 같이 도는 것 | KEDP(`kedp-postgres` 가 127.0.0.1:5432) | KEDP(:8090, 자기 네트워크 안) |
 
-공개 주소가 도메인(`sunmoonwork.duckdns.org`)에서 IP 로 바뀌었습니다 — DuckDNS 계정을 찾지 못해서입니다.
-코드의 기본 주소는 2026-11-08 커밋에서 `61.73.134.2` 로 바꿨습니다(terminals `6cfaf90`, channel-order
-`03b59e5`, bo `78f72e2`, store-app `5e2bee3`).
+밖에서는 **도메인 `sunmoonwork.duckdns.org`** 로 엽니다 — 코드·QR 이 담는 주소도 도메인입니다. 2026-11-09 에
+DuckDNS 가 macpro 의 IP 를 가리키게 바꿨습니다(전날 잠시 IP 로 바꿨다가 도메인으로 되돌림). 서버를 옮기거나 IP 가
+바뀌면 DuckDNS 의 IP 만 바꾸면 되고, 코드와 인쇄한 QR 은 그대로입니다.
 
 ## 포트
 
@@ -29,7 +29,7 @@ macpro 는 image 를 받아 띄우기만 합니다. dell 쪽 서버 구성은 De
 | 5432 · 6379 | PostgreSQL · Redis | localhost |
 
 **허용 IP** 는 ufw 로 정합니다 — 작업하는 곳의 공인 IP 와 LAN(`192.168.0.0/24`)만 엽니다(KEDP 의 허용 목록과 같은
-생각). 허용한 곳에서는 공인 주소 `61.73.134.2:<포트>` 로 엽니다. 작업하는 곳의 공인 IP 가 바뀌면 규칙을 다시 넣습니다:
+생각). 허용한 곳에서는 `sunmoonwork.duckdns.org:<포트>` 로 엽니다. 작업하는 곳의 공인 IP 가 바뀌면 규칙을 다시 넣습니다:
 
 ```bash
 sudo ufw allow from <공인 IP> to any port 8080,8083,8086 proto tcp
@@ -84,7 +84,7 @@ SUNMOON_HOST=mac-debian scripts/deploy.sh pos   # kds | did
    와 같고, 다른 것은:
    - DB 비밀번호 **네 곳 모두** `SUNMOON_DB_PASSWORD` 와 같은 값 — bo 하나만 달라도 BO 가 재시작을 반복합니다
    - BO `DEVICE_SERVER_ADMIN_TOKEN` = Device `ADMIN_TOKEN`
-   - BO `QR_TABLE_BASE_URL=http://61.73.134.2:8085/channel-order/t/`, Device `API_AUTH=warn`
+   - BO `QR_TABLE_BASE_URL=http://sunmoonwork.duckdns.org:8085/channel-order/t/`, Device `API_AUTH=warn`
 9. 기동 순서 — **fdw 는 정해진 자리에서만**:
    ```bash
    up.sh bo
