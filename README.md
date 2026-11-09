@@ -1,64 +1,93 @@
 # sun-moon-java-platform
 
-매장 주문·주방·매출 시스템(sun-moon)의 **umbrella** 저장소입니다. 애플리케이션 소스는
-없고, 서비스 저장소를 submodule 로 묶고 전체에 걸친 결정(ADR)과 문서를 둡니다.
+**매장 주문·주방·매출 시스템 sun-moon** 의 전체를 소개하는 저장소입니다.
 
-## 읽는 순서
+손님이 QR·앱·키오스크로 주문하면, 매장의 POS·주방 화면(KDS)·호출 화면(DID)을 거쳐 매출로 남기까지의
+흐름을 서비스 여러 개로 나누어 만들었습니다. 이 저장소에는 실행 코드가 없고, 서비스 저장소를
+submodule 로 묶어 **전체 구조와 설계 결정(ADR)** 을 둡니다(umbrella 저장소).
 
-1. [`docs/FLOW.md`](docs/FLOW.md) — **지금 전체가 어떻게 동작하는가** (한 장 그림, 주문의 일생, 켜는 스위치)
-2. [`docs/REVIEW-2026-09-29.md`](docs/REVIEW-2026-09-29.md) — 기능 확인표 (어디서 보나, 근거, 상태)
-3. [`docs/HANDOFF-2026-10-03.md`](docs/HANDOFF-2026-10-03.md) — 새 서버(Debian 13), 도메인, 최근 정리, 공통화 선택지 (그 앞은 [10-01](docs/HANDOFF-2026-10-01.md) · [09-29](docs/HANDOFF-2026-09-29.md))
-4. 설계: [`docs/design/store-app.md`](docs/design/store-app.md) (매장 단말) ·
-   [`docs/design/customer-app.md`](docs/design/customer-app.md) (손님 앱)
-   · 공통화(10-03 결정, 구현 전): [`terminal-monorepo.md`](docs/design/terminal-monorepo.md) (단말 화면 한 저장소) ·
-   [`reprocess-library.md`](docs/design/reprocess-library.md) (재처리 공통 라이브러리)
-5. Spring 서비스들의 공통 규칙: [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) — 규칙이 아니라 돌려 보는 명령으로
+## 한눈에
 
-## 전체 구성 (2026-11-08)
+- **서비스**: Spring Boot 서비스 6개 + Netty Device Server + 단말 화면 + Electron 매장 셸
+- **기술**: Java 21 · Spring Boot 3.3 · Netty · PostgreSQL(JSONB, postgres_fdw) · Redis · React 18 + TypeScript · Electron · Docker
+- **설계 기록**: ADR 15편 — 무엇을 왜 그렇게 정했는지, 무엇을 버렸는지
+- **운영**: 서비스마다 Docker 컨테이너 하나. 빌드는 개발 서버, 실행은 배포 서버에서 ([배포 절차](docs/DEPLOY-MACPRO.md))
 
-서비스마다 Docker 컨테이너 하나로 돕니다. **2026-11-08 부터 실행은 macpro-debian(공개 `61.73.134.2`),
-빌드는 dell-debian** 에서 합니다 — 배포 절차와 한 줄 배포 script(`scripts/ship.sh`)는
-[`docs/DEPLOY-MACPRO.md`](docs/DEPLOY-MACPRO.md). 그 전의 서버 구성은
-[`Debian-Setting/docs/docker.md`](https://github.com/schware/Debian-Setting/blob/master/docs/docker.md),
-비밀의 위치는 같은 저장소의 `docs/secrets.md` (값은 어디에도 적지 않음).
+## 구조
 
-| 구성 | 저장소 | 여기서 | 주소 | 역할 |
-|---|---|---|---|---|
-| **OMS (Order)** | [sun-moon-java-platform-order](https://github.com/schware/sun-moon-java-platform-order) | [`order/`](order) | `:8083/order/` LAN | 주문·영업일·수령번호 — 사실이 적히는 곳 |
-| **APP-SERVER** | [sun-moon-java-platform-app-server](https://github.com/schware/sun-moon-java-platform-app-server) | [`app-server/`](app-server) | `:8086` LAN | 손님 원장·결제·회원·푸시 |
-| **channel-order** | [sun-moon-java-platform-channel-order](https://github.com/schware/sun-moon-java-platform-channel-order) | [`channel-order/`](channel-order) | `:8085/channel-order/` 공개 | 손님 창구 — QR 웹, 앱 API, KIOSK 화면 |
-| **BO** | [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) | [`bo/`](bo) | `:8080/bo/` LAN | 기준정보·장비·매출 조회·관제 (React 콘솔 포함) |
-| **Device Server** | 이 GitHub 저장소의 **`master` 브랜치** | — | `:8087` 공개 | 단말 연결(WebSocket)·매출 원본·라벨·운영 (Netty) |
-| **POS · KDS · DID 화면** | [sun-moon-terminals](https://github.com/schware/sun-moon-terminals) (`pos/` `kds/` `did/` + 공통 `common/`) — 2026-10-03 에 셋을 합침, 옛 저장소는 archive | — | `:8000/pos/` `/kds/` `/did/` | 매장 단말 웹 화면 (nginx 가 번들을 줌) |
-| **매장 단말 셸** | [sun-moon-store-app](https://github.com/schware/sun-moon-store-app) | — | — | POS·KIOSK·KDS-MAIN 용 Electron 셸 — 매장에는 아직 없음 |
-| Java 공통 틀 | [sun-moon-java-common](https://github.com/schware/sun-moon-java-common) — 2026-10-03 | — | — | 실패 재처리의 틀(`reprocess`). Device Server·Order·APP-SERVER 가 submodule 로 씀 — [설계](docs/design/reprocess-library.md) |
-| 서버 설정 | [Debian-Setting](https://github.com/schware/Debian-Setting) | — | — | 배포·DB·비밀 위치 |
-| KDS · Delivery | [kds](https://github.com/schware/sun-moon-java-platform-kds) · [delivery](https://github.com/schware/sun-moon-java-platform-delivery) | [`kds/`](kds) [`delivery/`](delivery) | `:8081` · `:8082` | 처음 MSA 로 나눌 때의 서비스. 컨테이너는 떠 있지만 지금의 주문 흐름(FLOW.md)에는 없음 |
+```
+  손님 ── QR 웹 · 앱 ──→ channel-order ──→ APP-SERVER ──┐
+                       (손님 창구)        (손님 원장·결제)  ↓
+                                                    OMS (Order) ── Redis order-events
+                                                    (사실이 적히는 곳)      │
+                                                         ↑                  │
+                           BO ──→ Device Server ─────────┘ ←────────────────┘
+                     (기준정보·관제)  (단말 연결·인증·매출 원본)
+                                         ↑ HTTP + WebSocket
+  매장 ── POS · KIOSK · KDS-MAIN (Electron 셸) / KDS SUB · DID (웹)
+```
 
-submodule 은 각 저장소의 최신 커밋(= 서버에 배포된 커밋)을 가리킵니다.
+**매장 안에는 서버가 없습니다**([ADR-0010](docs/adr/0010-the-pos-terminal-holds-state-without-a-store-server.md)).
+모든 단말은 중앙의 Device Server 하나에 붙고, POS 는 자기 원장(SQLite)을 들고 매출을 올립니다.
+주문 한 건이 어떻게 흘러가는지는 [`docs/FLOW.md`](docs/FLOW.md) 에 있습니다.
 
-Archived predecessors:
-[sun-moon-java-platform-netty](https://github.com/schware/sun-moon-java-platform-netty)
-(single-service, Netty, no Spring, pre-split) and the WAR/shared-Jetty
-version of each service —
-[order-jetty](https://github.com/schware/sun-moon-java-platform-order-jetty),
-[kds-jetty](https://github.com/schware/sun-moon-java-platform-kds-jetty),
-[delivery-jetty](https://github.com/schware/sun-moon-java-platform-delivery-jetty)
-— see `docs/adr/0003` for why those were replaced with Docker. BO's
-Spring-free Netty implementation is archived as
-[sun-moon-platform-bo-netty](https://github.com/schware/sun-moon-platform-bo-netty)
-— see `docs/adr/0004`.
+## 저장소
 
-## Cloning
+| 구성 | 저장소 | 역할 |
+|---|---|---|
+| **OMS (Order)** | [sun-moon-java-platform-order](https://github.com/schware/sun-moon-java-platform-order) | 주문·영업일·수령번호 — 사실이 적히는 곳 |
+| **APP-SERVER** | [sun-moon-java-platform-app-server](https://github.com/schware/sun-moon-java-platform-app-server) | 손님 원장·결제·회원·푸시 |
+| **channel-order** | [sun-moon-java-platform-channel-order](https://github.com/schware/sun-moon-java-platform-channel-order) | 손님 창구 — QR 웹, 앱 API, KIOSK 화면 |
+| **BO** | [sun-moon-java-platform-bo](https://github.com/schware/sun-moon-java-platform-bo) | 기준정보·장비·매출 조회·관제 (React 콘솔 포함) |
+| **Device Server** | 이 저장소의 [`master` branch](https://github.com/schware/sun-moon-java-platform/tree/master) | 단말 연결(WebSocket)·기기 인증·매출 원본·라벨·운영 (Netty) |
+| **POS · KDS · DID 화면** | [sun-moon-terminals](https://github.com/schware/sun-moon-terminals) | 매장 단말 웹 화면 (`pos/` `kds/` `did/` + 공통 `common/`) |
+| **매장 단말 셸** | [sun-moon-store-app](https://github.com/schware/sun-moon-store-app) | POS·KIOSK·KDS-MAIN 용 Electron 셸 — 원장·프린터·업데이트 |
+| Java 공통 틀 | [sun-moon-java-common](https://github.com/schware/sun-moon-java-common) | 실패 재처리의 틀(`reprocess`) — [설계](docs/design/reprocess-library.md) |
+| Netty 커널 | [sun-moon-platform-core](https://github.com/schware/sun-moon-platform-core) | Device Server 가 쓰는 Netty listener·REST routing 라이브러리 |
+| KDS · Delivery | [kds](https://github.com/schware/sun-moon-java-platform-kds) · [delivery](https://github.com/schware/sun-moon-java-platform-delivery) | 처음 MSA 로 나눌 때의 서비스. 지금의 주문 흐름에는 없음 |
+
+## 핵심 설계 결정
+
+ADR 15편 중 이 시스템의 성격을 가장 잘 보여 주는 다섯 편입니다. 전체 목록은 [아래](#설계-결정-전체-adr)에 있습니다.
+
+- [**0010**](docs/adr/0010-the-pos-terminal-holds-state-without-a-store-server.md) 매장 서버 없이 — POS 가 자기 원장을 들고, 거래의 출처가 되어 묶음으로 올린다
+- [**0009**](docs/adr/0009-the-pos-terminal-mints-the-transaction-number.md) 거래번호는 서버가 아니라 POS 가 만든다 — 다시 보내도 안전하게 만드는 unique 제약
+- [**0012**](docs/adr/0012-app-server-owns-the-customer-order-ledger.md) "손님이 요청한 것"과 "매장이 받은 것"은 다른 기록이다 — 멱등 key, 거절과 못 닿음의 구분
+- [**0006**](docs/adr/0006-business-day-and-the-sales-key.md) 영업일은 Order 에 두고, 타이머로 매장을 닫지 않는다 — 네 부분짜리 매출 key
+- [**0014**](docs/adr/0014-master-screens-are-definitions-not-code.md) 기준정보 화면은 코드가 아니라 정의다 — 무엇에 쓰고 무엇에 안 쓰는가
+
+## 문서
+
+| 문서 | 내용 |
+|---|---|
+| [`docs/FLOW.md`](docs/FLOW.md) | 지금 전체가 어떻게 동작하는가 — 한 장 그림, 주문의 일생, 켜는 스위치 |
+| [`docs/design/store-app.md`](docs/design/store-app.md) · [`customer-app.md`](docs/design/customer-app.md) | 매장 단말 앱 · 손님 앱 설계 |
+| [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) | Spring 서비스들의 공통 규칙 — 규칙이 아니라 돌려 보는 명령으로 |
+| [`docs/DEPLOY-MACPRO.md`](docs/DEPLOY-MACPRO.md) | 배포 절차와 한 줄 배포 script(`scripts/ship.sh`) |
+| [`docs/REVIEW-2026-09-29.md`](docs/REVIEW-2026-09-29.md) | 기능 확인표 — 어디서 보나, 근거, 상태 |
+
+## 설계 결정 전체 (ADR)
+
+- [`0001`](docs/adr/0001-per-service-database-choice.md) — 서비스별 DB 선택(Order/Delivery: Postgres+JSONB, KDS: Redis)과, 도중에 계획을 바꾼 하드웨어 발견(이 서버 CPU 에서 MongoDB 가 돌지 않음)
+- [`0002`](docs/adr/0002-msa-split-direction.md) — 왜 Order/KDS/Delivery 로 나누었는가, 그 사이의 event 흐름
+- [`0003`](docs/adr/0003-docker-replaces-shared-jetty.md) — 공유 Jetty 배포를 서비스마다 Docker 컨테이너로 바꾼 이유
+- [`0004`](docs/adr/0004-bo-joins-this-family-as-a-spring-service.md) — BO 를 raw Netty 에서 Spring 으로 다시 만들어 이 계열에 합친 이유
+- [`0005`](docs/adr/0005-bo-ships-its-own-react-console.md) — BO 의 React 콘솔을 jar 안에 함께 싣는 이유, 그래서 API 가 `/api` 아래로 간 것
+- [`0006`](docs/adr/0006-business-day-and-the-sales-key.md) — 영업일은 Order 에, 타이머로 닫지 않음, 네 부분짜리 매출 key
+- [`0007`](docs/adr/0007-a-table-is-a-destination-and-qr-codes-are-not-one-thing.md) — 테이블은 주문이 *가는 곳*이다. 테이블 QR 과 주문 QR 을 나눈 이유
+- [`0008`](docs/adr/0008-execution-plane-services-read-bo-master-through-a-view.md) — OMS·APP-SERVER 가 BO 기준정보를 읽는 방법(postgres_fdw view, 읽기 전용)
+- [`0009`](docs/adr/0009-the-pos-terminal-mints-the-transaction-number.md) — 거래번호는 POS 가 만든다, 다시 보내도 안전한 unique 제약
+- [`0010`](docs/adr/0010-the-pos-terminal-holds-state-without-a-store-server.md) — 매장 서버 없음, POS 가 SQLite 원장을 들고 묶음으로 올림
+- [`0011`](docs/adr/0011-sold-out-and-the-pickup-number.md) — 결품은 판매일자 key 라 개점이 저절로 지운다, 수령번호는 두 값 두 역할
+- [`0012`](docs/adr/0012-app-server-owns-the-customer-order-ledger.md) — APP-SERVER 가 자기 주문 원장을 갖는 이유, 화면이 만드는 멱등 key
+- [`0013`](docs/adr/0013-pos-server-becomes-a-system-of-record.md) — POS-Server 가 사실을 갖기 시작한다: 매출 원본·분해, 개점·마감, Live Check, 마스터 배포
+- [`0014`](docs/adr/0014-master-screens-are-definitions-not-code.md) — 기준정보 화면은 정의 한 줄이 화면 하나, 감사로그는 한 곳을 지난다
+- [`0015`](docs/adr/0015-store-terminals-electron-where-the-hardware-is.md) — 하드웨어가 있는 단말만 Electron 셸, 나머지는 웹. KDS-MAIN 이 주방의 중심
+
+## 받아 보기
 
 ```
 git clone --recurse-submodules https://github.com/schware/sun-moon-java-platform.git
-```
-
-Already cloned without `--recurse-submodules`?
-
-```
-git submodule update --init --recursive
 ```
 
 submodule 이 아닌 것 (Device Server, 단말 화면, 셸):
@@ -69,83 +98,13 @@ git clone https://github.com/schware/sun-moon-terminals.git
 git clone https://github.com/schware/sun-moon-store-app.git
 ```
 
-## Where things run
+submodule 은 각 저장소의 최신 commit(= 서버에 배포된 commit)을 가리킵니다.
 
-Port numbers come from the server-wide scheme, not from this repo — see
-Debian-Setting's `docs/docker.md`. Order moved 8080 → 8083 to free 8080
-for BO. 전체 주소는 위의 "전체 구성" 표에 있습니다.
+## 작업 기록
 
-Previously all three ran as WARs on one shared Jetty instance — see
-`docs/adr/0003` for why that changed. That setup's docs/scripts are
-preserved in the now-archived `-jetty` repos (linked there) in case the
-Docker approach ever needs to be un-done.
+진행 중에 남긴 인수인계 문서입니다. 시간 순서대로 무엇을 정하고 바꿨는지 볼 수 있습니다.
+[09-18](docs/HANDOFF-2026-09-18.md) · [09-24](docs/HANDOFF-2026-09-24.md) · [09-27](docs/HANDOFF-2026-09-27.md) ·
+[09-29](docs/HANDOFF-2026-09-29.md) · [10-01](docs/HANDOFF-2026-10-01.md) · [10-03](docs/HANDOFF-2026-10-03.md)
 
-## Architecture decisions (this repo)
-
-- [`docs/adr/0001`](docs/adr/0001-per-service-database-choice.md) — final
-  per-service database choice (Order/Delivery: Postgres+JSONB, KDS:
-  Redis) and the hardware discovery that changed the plan mid-flight
-  (MongoDB doesn't run on this box's CPU).
-- [`docs/adr/0002`](docs/adr/0002-msa-split-direction.md) — why the
-  system is split into Order/KDS/Delivery at all and the event flow
-  between them (messaging bus not implemented yet).
-- [`docs/adr/0003`](docs/adr/0003-docker-replaces-shared-jetty.md) — why
-  the shared-Jetty deployment was replaced with one Docker container per
-  service, and where the old WAR/Jetty setup's docs live now.
-- [`docs/adr/0004`](docs/adr/0004-bo-joins-this-family-as-a-spring-service.md)
-  — why BO was rebuilt on Spring and joined this family, rather than
-  staying the one service built on raw Netty.
-- [`docs/adr/0005`](docs/adr/0005-bo-ships-its-own-react-console.md) — why
-  BO's React/TypeScript console ships inside its own jar, and why that
-  forced the API under `/api`.
-- [`docs/adr/0006`](docs/adr/0006-business-day-and-the-sales-key.md) —
-  why 영업일 lives in Order rather than BO, why nothing closes a store on
-  a timer, and the four-part sales key everything else hangs off.
-- [`docs/adr/0007`](docs/adr/0007-a-table-is-a-destination-and-qr-codes-are-not-one-thing.md)
-  — a table is where an order *goes*, not a session or a bill, and why
-  테이블 QR and 주문 QR get separate code spaces instead of one abstraction.
-- [`docs/adr/0008`](docs/adr/0008-execution-plane-services-read-bo-master-through-a-view.md)
-  — how OMS and APP-SERVER read BO's master at runtime (postgres_fdw view,
-  read-only), and why that is a deliberate boundary change.
-- [`docs/adr/0009`](docs/adr/0009-the-pos-terminal-mints-the-transaction-number.md)
-  — 거래번호 is minted by the POS terminal, not the server, and the unique
-  constraint that makes re-sending a transaction safe.
-- [`docs/adr/0010`](docs/adr/0010-the-pos-terminal-holds-state-without-a-store-server.md)
-  — no store server; the POS keeps its own SQLite, becomes the origin of
-  its transactions, and uploads them in batches.
-- [`docs/adr/0011`](docs/adr/0011-sold-out-and-the-pickup-number.md)
-  — 결품 is keyed by 판매일자 so 개점 clears it with no batch to forget, and
-  수령번호 is two values with two jobs (부르는 번호 / 증명하는 번호).
-- [`docs/adr/0012`](docs/adr/0012-app-server-owns-the-customer-order-ledger.md)
-  — APP-SERVER keeps its own order ledger because "what the customer asked
-  for" and "what the store was given to make" are different records; the
-  screen mints the idempotency key, and 거절 is not 못 닿음.
-- [`docs/adr/0014`](docs/adr/0014-master-screens-are-definitions-not-code.md)
-  — 기준정보 화면은 코드가 아니라 정의다. 정의 한 줄이 화면 하나이고,
-  감사로그는 한 곳을 지나가므로 한 번만 만들면 전부에 붙는다. 무엇에 쓰고
-  **무엇에 안 쓰는가**가 이 구조의 실제 결정이다.
-- [`docs/adr/0013`](docs/adr/0013-pos-server-becomes-a-system-of-record.md)
-  — POS-Server starts holding facts: 매출 원본과 분해, 단말 단위 개점·마감
-  (재개점은 서버가 판단하고 지나간 전문은 상태를 못 바꾼다), Live Check 5종,
-  마스터 배포(적용 버전은 장비가 말해야 올라간다). 추가분(09-18): §3.5 의 나머지
-  — 시계는 서버가 재고, 프로그램 버전은 이름이라 되돌리기가 그냥 새 배포이며,
-  긴급 메시지는 먼저 적고 그다음에 민다. 그리고 그것을 볼 BO 화면 넷.
-- [`docs/adr/0015`](docs/adr/0015-store-terminals-electron-where-the-hardware-is.md)
-  — 매장 단말은 하드웨어(원장·프린터)가 있는 곳만 Electron 셸, 나머지는 웹. KDS-MAIN 이
-  주방의 중심.
-
-> **지금 어떻게 동작하는지는** [`docs/FLOW.md`](docs/FLOW.md) 한 곳에 있습니다 —
-> 단말과 서버, 기기 신원(페어링·토큰), 주문의 일생, KIOSK, 라벨, 셸, 켜는 스위치.
->
-> **다음에 이어서 하려면** 가장 최근의 [`docs/HANDOFF-2026-09-29.md`](docs/HANDOFF-2026-09-29.md)
-> 부터 읽으십시오 (그 앞은 [09-27](docs/HANDOFF-2026-09-27.md) ·
-> [09-24](docs/HANDOFF-2026-09-24.md) · [09-18](docs/HANDOFF-2026-09-18.md) —
-> "모든 것을 공통으로" 라는 방향을 어디에 쓰고 어디에 쓰면 안 되는지는 09-18 에).
->
-> 매장 단말 셸(Electron)은 별도 저장소 `sun-moon-store-app` 입니다. 설계:
-> [`docs/design/store-app.md`](docs/design/store-app.md) · 손님 앱:
-> [`docs/design/customer-app.md`](docs/design/customer-app.md).
-
-The archived `-jetty` repos (linked from `docs/adr/0003`) each have their
-own `docs/adr/` covering the WAR/Jetty deployment mechanics and a
-classpath bug worth knowing about if that setup is ever revisited.
+이전 구현(공유 Jetty 위의 WAR, Spring 없는 Netty BO)은 비공개 archive 저장소로 남겨 두었고,
+바꾼 이유는 [ADR-0003](docs/adr/0003-docker-replaces-shared-jetty.md) · [ADR-0004](docs/adr/0004-bo-joins-this-family-as-a-spring-service.md) 에 있습니다.
